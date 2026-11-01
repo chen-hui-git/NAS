@@ -506,15 +506,18 @@ x = x + conv1d_k( LayerNorm(x) , out = dim x ratio )    ← kernel、ratio 来�
       ["工作", "时间", "与三明治规则的关系"],
       [
           ["Slimmable Networks（arXiv:1903.05134）", "2019-03",
-           "最早提出这条规则：为了同时训好“最宽”和“最窄”两端，每步固定训练 max + min + 随机子网"],
+           "同时提出两件事：三明治规则（每步固定训练 max + min + 随机子网），以及 "
+           "<b>in-place distillation</b>（用最大的子网当教师，把软标签教给小尺寸子网）"],
           ["Once-for-All / OFA（arXiv:1908.09791）", "2019-08",
-           "把它当作训练配方沿用下来，并配上渐进收缩、弹性深度/宽度/卷积核/分辨率、BN 重估与部署专化"],
+           "两条都<b>沿用</b>，再配上渐进收缩、弹性深度/宽度/卷积核/分辨率、BN 重估与部署专化"],
           ["BigNAS（arXiv:2003.11142）", "2020-03",
-           "才是对规则的改进：用最大的子网当唯一教师做 in-place distillation，省掉再训练"],
+           "把 in-place distillation 收敛成“单一教师 + 单阶段训练”，并证明<b>不需要再训练 / fine-tune</b> 就能直接部署"],
           ["AttentiveNAS（arXiv:2011.09011）", "2020-11",
            "改进的是采样：不再均匀采样随机子网，而是偏向帕累托前沿附近"],
       ],
   )}
+  <p>注意：<b>知识蒸馏不是 BigNAS 独有的</b>，它是 Slimmable Networks 的 in-place distillation，OFA 与 BigNAS 都继承了，
+  区别只在于怎么用（OFA 配渐进收缩，BigNAS 用单教师并去掉再训练）。</p>
   <p>所以本页实现的是 <b>OFA 用的那条规则</b>，但只是规则本身；OFA / BigNAS 那套工程装置这里一个都没有：</p>
   {_table(
       ["OFA / BigNAS 有", "本 Demo", "后果"],

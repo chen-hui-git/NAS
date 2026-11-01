@@ -304,7 +304,9 @@ x = x + conv1d_k( LayerNorm(x) , out = dim x ratio )    ← kernel、ratio 来�
 
   <h3>这条规则的出处，以及它和 OFA 是什么关系</h3>
   <p><b>不是“改进版 OFA”，反而是 OFA 用了这条规则。</b>按时间线：</p>
-  <table><thead><tr><th>工作</th><th>时间</th><th>与三明治规则的关系</th></tr></thead><tbody><tr><td>Slimmable Networks（arXiv:1903.05134）</td><td>2019-03</td><td>最早提出这条规则：为了同时训好“最宽”和“最窄”两端，每步固定训练 max + min + 随机子网</td></tr><tr><td>Once-for-All / OFA（arXiv:1908.09791）</td><td>2019-08</td><td>把它当作训练配方沿用下来，并配上渐进收缩、弹性深度/宽度/卷积核/分辨率、BN 重估与部署专化</td></tr><tr><td>BigNAS（arXiv:2003.11142）</td><td>2020-03</td><td>才是对规则的改进：用最大的子网当唯一教师做 in-place distillation，省掉再训练</td></tr><tr><td>AttentiveNAS（arXiv:2011.09011）</td><td>2020-11</td><td>改进的是采样：不再均匀采样随机子网，而是偏向帕累托前沿附近</td></tr></tbody></table>
+  <table><thead><tr><th>工作</th><th>时间</th><th>与三明治规则的关系</th></tr></thead><tbody><tr><td>Slimmable Networks（arXiv:1903.05134）</td><td>2019-03</td><td>同时提出两件事：三明治规则（每步固定训练 max + min + 随机子网），以及 <b>in-place distillation</b>（用最大的子网当教师，把软标签教给小尺寸子网）</td></tr><tr><td>Once-for-All / OFA（arXiv:1908.09791）</td><td>2019-08</td><td>两条都<b>沿用</b>，再配上渐进收缩、弹性深度/宽度/卷积核/分辨率、BN 重估与部署专化</td></tr><tr><td>BigNAS（arXiv:2003.11142）</td><td>2020-03</td><td>把 in-place distillation 收敛成“单一教师 + 单阶段训练”，并证明<b>不需要再训练 / fine-tune</b> 就能直接部署</td></tr><tr><td>AttentiveNAS（arXiv:2011.09011）</td><td>2020-11</td><td>改进的是采样：不再均匀采样随机子网，而是偏向帕累托前沿附近</td></tr></tbody></table>
+  <p>注意：<b>知识蒸馏不是 BigNAS 独有的</b>，它是 Slimmable Networks 的 in-place distillation，OFA 与 BigNAS 都继承了，
+  区别只在于怎么用（OFA 配渐进收缩，BigNAS 用单教师并去掉再训练）。</p>
   <p>所以本页实现的是 <b>OFA 用的那条规则</b>，但只是规则本身；OFA / BigNAS 那套工程装置这里一个都没有：</p>
   <table><thead><tr><th>OFA / BigNAS 有</th><th>本 Demo</th><th>后果</th></tr></thead><tbody><tr><td>渐进收缩（先训大子网，再逐步解锁小的）</td><td>没有，所有尺寸同时从头训练</td><td>中间与小尺寸早期欠训，本次 min 子网 96.9% 低于 max 的 98.1%</td></tr><tr><td>子网之间做知识蒸馏（KL 对齐 teacher logits）</td><td>没有，只是四条腿的交叉熵求和</td><td>腿之间只靠共享权重隐式互相影响，没有显式教师信号</td></tr><tr><td>BN 重估 + 导出子网 fine-tune</td><td>不需要 BN 重估（本实现用 LayerNorm）；导出也仍未 fine-tune</td><td>导出的子网精度低于它在超网里“应得”的水平</td></tr><tr><td>弹性分辨率、真实延迟目标</td><td>只有参数量代理</td><td>第 5 节的“成本”是参数量不是毫秒；延迟必须自己测</td></tr></tbody></table>
   <p>训练完成后，覆盖统计证明每个深度、每个分支都真的拿到了梯度：</p>
@@ -467,7 +469,7 @@ tests/test_supernet.py 35 个回归测试</pre>
 </section>
 
 <footer>
-  由 <code class="inline">examples/run_demo.py</code> 自动生成 · 2026-11-01 15:18:42 ·
+  由 <code class="inline">examples/run_demo.py</code> 自动生成 · 2026-11-01 15:24:30 ·
   图中标签使用英文，因为 matplotlib 默认字体没有中文字形。
 </footer>
 
