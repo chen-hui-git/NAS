@@ -402,9 +402,8 @@ def build_report(context: dict, out_path: Path) -> Path:
             ("trap", "6 陷阱：排序不一致"),
             ("budget", "7 预算记账"),
             ("run", "8 复现与文件结构"),
-            ("exercises", "9 可复现的实验"),
-            ("scope", "10 适用范围"),
-            ("refs", "11 参考文献"),
+            ("exercises", "9 自己动手"),
+            ("refs", "10 参考文献"),
         )
     )
 
@@ -877,30 +876,8 @@ tests/test_supernet.py 35 个回归测试</pre>
   这比任何文字都更能说明：<b>超网分数是代理，不是结论</b>。</div>
 </section>
 
-<section id="scope">
-  <h2>10 适用范围<span class="tag">边界</span></h2>
-  <h3>适用范围：哪些结论能带走，哪些不能</h3>
-  <p>本页所有数字都来自<b>一个模型族 + 一个数据集 + 一个训练预算</b>。把结论搬走之前，请先分清两类：</p>
-  {_table(
-      ["结论", "类型", "换设置后还成立吗"],
-      [
-          ["超网 &gt; 最大子网，差额 = 每层未被选中的分支", "结构性（纯算术）", "✅ 成立，只是数字变"],
-          ["通道可切片、卷积核不可切片", "结构性（前缀语义）", "✅ 方向成立，掉点多少会变"],
-          ["宽度/深度必须全局一致，FFN 分支可逐层不同", "结构性（代码约束）", "✅ 成立"],
-          ["导出子网 zero-shot == 超网内分数", "实现性质（LayerNorm）", "⚠️ 换成 BatchNorm 就不成立"],
-          ["深度扫描几乎平、宽度阶梯单调", "经验性（任务难度）", "❌ 需重测；更难任务上深度可能有明显收益"],
-          ["τ ≈ {_fmt(ranking['kendall_tau'], 2)}、recall@3 = {recall_rows[1][1] if len(recall_rows) > 1 else '—'}", "经验性（训练量）", "❌ 需重测；步数不足时曾测到 τ 变负"],
-          ["KD 让小子网涨点、微调收益在 KD 之后变小", "经验性（欠训程度）", "⚠️ 方向大致成立，幅度需重测"],
-          ["渐进收缩在小预算下更差", "经验性（预算规模）", "⚠️ 大预算时可能反超"],
-      ],
-  )}
-  <div class="note">必须重测的三件事：<b>①</b> 深度/宽度扫描曲线（判断该任务缺深度还是缺宽度）；
-  <b>②</b> τ 与 recall@k（超网分数还能不能当筛选器）；<b>③</b> PS 与 KD 的收益方向。
-  其余（参数分解、切片机制、覆盖形状、zero-shot 等价、记账口径）可以直接沿用。</div>
-</section>
-
 <section id="refs">
-  <h2>11 参考文献<span class="tag">出处</span></h2>
+  <h2>10 参考文献<span class="tag">出处</span></h2>
   <ul>
     <li>Bender et al. <i>Understanding and Simplifying One-Shot Architecture Search</i>. <a href="https://arxiv.org/abs/1802.01548">arXiv:1802.01548</a></li>
     <li>Pham et al. <i>Efficient Neural Architecture Search via Parameter Sharing</i>. <a href="https://arxiv.org/abs/1802.03268">arXiv:1802.03268</a></li>
