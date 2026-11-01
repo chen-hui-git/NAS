@@ -1,0 +1,190 @@
+"""The sandwich-rule training loop.
+
+Each step trains four subnets and sums their losses into one optimizer step:
+
+    max     the most expensive subnet (deepest, widest, largest kernel/expansion)
+    min     the cheapest subnet
+    random  n_random uniformly sampled subnets
+
+Rationale (slimmable networks, refined by Once-for-All): the max subnet is the best
+performing one, the min subnet keeps the shared weights honest at the low end, and the
+random legs bring coverage; every subnet also acts as an in-place distillation target
+for the others, because they all update the same weights.
+"""
+
+from __future__ import annotations
+
+from collections import Counter
+from dataclasses import dataclass, field
+import random
+from typing import Callable
+
+from torch import Tensor
+import torch
+
+from .losses import masked_next_token_loss
+from .search_space import SearchSpace, SubnetSpec
+from .supernet import Supernet
+
+
+@dataclass(frozen=True)
+class SandwichConfig:
+    lr: float = 3e-3
+    weight_decay: float = 1e-2
+    n_random: int = 2
+    max_weight: float = 1.0
+    min_weight: float = 1.0
+    random_weight: float = 1.0
+    grad_clip: float = 1.0
+    seed: int = 0
+
+    def __post_init__(self) -> None:
+        if self.n_random < 0:
+            raise ValueError("n_random must be non-negative")
+        for name, value in (
+            ("max_weight", self.max_weight),
+            ("min_weight", self.min_weight),
+            ("random_weight", self.random_weight),
+        ):
+            if value < 0:
+                raise ValueError(f"{name} must be non-negative")
+
+
+@dataclass
+class SandwichStats:
+    """Coverage evidence: which parts of the space actually received gradients."""
+
+    steps: int = 0
+    subnets_trained: int = 0
+    depth_counts: Counter = field(default_factory=Counter)
+    kernel_counts: Counter = field(default_factory=Counter)
+    ratio_counts: Counter = field(default_factory=Counter)
+    dim_counts: Counter = field(default_factory=Counter)
+    activation_counts: Counter = field(default_factory=Counter)
+
+    def record(self, spec: SubnetSpec) -> None:
+        self.subnets_trained += 1
+        self.depth_counts[spec.depth] += 1
+        self.dim_counts[spec.embed_dim] += 1
+        for layer in spec.layers:
+            self.kernel_counts[layer.ffn_kernel] += 1
+            self.ratio_counts[layer.ffn_ratio] += 1
+            self.activation_counts[layer.activation] += 1
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "steps": self.steps,
+            "subnets_trained": self.subnets_trained,
+            "depth_counts": {str(k): v for k, v in sorted(self.depth_counts.items())},
+            "dim_counts": {str(k): v for k, v in sorted(self.dim_counts.items())},
+            "kernel_counts": {str(k): v for k, v in sorted(self.kernel_counts.items())},
+            "ratio_counts": {str(k): v for k, v in sorted(self.ratio_counts.items())},
+            "activation_counts": {
+                str(k): v for k, v in sorted(self.activation_counts.items())
+            },
+        }
+
+
+@dataclass(frozen=True)
+class StepRecord:
+    step: int
+    total_loss: float
+    grad_norm: float
+    role_losses: dict[str, float]
+    role_arch_ids: dict[str, str]
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "step": self.step,
+            "total_loss": self.total_loss,
+            "grad_norm": self.grad_norm,
+            "role_losses": dict(self.role_losses),
+            "role_arch_ids": dict(self.role_arch_ids),
+        }
+
+
+class SandwichTrainer:
+    """Trains one Supernet by sampling a sandwich of subnets on every step."""
+
+    def __init__(
+        self,
+        space: SearchSpace,
+        config: SandwichConfig | None = None,
+        model: Supernet | None = None,
+    ) -> None:
+        self.space = space
+        self.config = config or SandwichConfig()
+        self.rng = random.Random(self.config.seed)
+        torch.manual_seed(self.config.seed)
+        self.model = model if model is not None else Supernet(space)
+        self.optimizer = torch.optim.AdamW(
+            self.model.parameters(),
+            lr=self.config.lr,
+            weight_decay=self.config.weight_decay,
+        )
+        self.stats = SandwichStats()
+        self.step_index = 0
+
+    # [snippet:sandwich-build]
+    def build_sandwich(self) -> list[tuple[str, SubnetSpec, float]]:
+        """Return the (role, spec, loss_weight) legs of this step's sandwich."""
+        config = self.config
+        legs: list[tuple[str, SubnetSpec, float]] = [
+            ("max", self.space.max_subnet(), config.max_weight),
+            ("min", self.space.min_subnet(), config.min_weight),
+        ]
+        for index in range(config.n_random):
+            legs.append(
+                (f"random_{index}", self.space.sample(self.rng), config.random_weight)
+            )
+        return legs
+    # [/snippet:sandwich-build]
+
+    # [snippet:sandwich-step]
+    def train_step(self, tokens: Tensor, targets: Tensor, mask: Tensor) -> StepRecord:
+        self.model.train()
+        self.optimizer.zero_grad(set_to_none=True)
+        role_losses: dict[str, float] = {}
+        role_arch_ids: dict[str, str] = {}
+        total = 0.0
+        for role, spec, weight in self.build_sandwich():
+            loss = masked_next_token_loss(self.model(tokens, spec), targets, mask)
+            if weight > 0:
+                (loss * weight).backward()
+            value = float(loss.detach())
+            role_losses[role] = value
+            role_arch_ids[role] = spec.arch_id
+            total += weight * value
+            self.stats.record(spec)
+        grad_norm = torch.nn.utils.clip_grad_norm_(
+            self.model.parameters(), self.config.grad_clip
+        )
+        self.optimizer.step()
+        self.step_index += 1
+        self.stats.steps = self.step_index
+        # [/snippet:sandwich-step]
+        return StepRecord(
+            step=self.step_index,
+            total_loss=total,
+            grad_norm=float(grad_norm),
+            role_losses=role_losses,
+            role_arch_ids=role_arch_ids,
+        )
+
+    def train(
+        self,
+        batch_fn: Callable[[int], tuple[Tensor, Tensor, Tensor]],
+        steps: int,
+        log_every: int = 0,
+        on_log: Callable[[StepRecord], None] | None = None,
+    ) -> list[StepRecord]:
+        history: list[StepRecord] = []
+        for step in range(steps):
+            tokens, targets, mask = batch_fn(step)
+            record = self.train_step(tokens, targets, mask)
+            history.append(record)
+            if on_log is not None and log_every > 0 and (
+                (step + 1) % log_every == 0 or step == 0
+            ):
+                on_log(record)
+        return history
