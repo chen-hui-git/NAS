@@ -60,6 +60,7 @@ Kendall τ ≈ +0.24、recall@3 = 2/3、recall@5 = 2/5（随机基线 0.30 / 0.5
 | `report/supernet_demo.html` | 中文报告（自包含，图片内嵌 base64，可直接分享） |
 | `report/figures/*.png` | 6 张图：切片示意（**由示例 spec 真实画出**：共享张量用到的通道块 + 每层选中的 FFN 分支）、三条腿损失+准确率、空间覆盖、子网族曲线、排序散点、逐张预测 |
 | `report/metrics.json` | 本次运行的全部数字（空间、参数、准确率、排序相关性、耗时明细） |
+| `report/supernet.pt` | 训好的超网权重（70 MB，**Git LFS 跟踪**；`git lfs pull` 拉取，校验方法见 `docs/reproduce.md`） |
 | `report/sandwich_log.jsonl` | 每一步四条腿的 loss / acc 与对应 arch_id，可逐行复现/画图 |
 
 ---
@@ -101,6 +102,7 @@ docs/notes.md             开放问题与常见误区（带实测数字，不随
 docs/comparison.md        三组同预算实测：joint / 渐进收缩 / 子网蒸馏
 docs/finetune.md          导出子网的微调配方与实测收益
 docs/ofa_gap.md           OFA 有、本 Demo 没做的部件清单（含补齐优先级）
+docs/reproduce.md         复现指南（三级复现 + 权重 LFS 取用与校验）
 tests/test_supernet.py    35 个回归测试
 ```
 
