@@ -284,6 +284,21 @@ def build_report(context: dict, out_path: Path) -> Path:
         ],
     )
 
+    by_supernet = [
+        row["arch_id"]
+        for row in sorted(ranking["candidates"], key=lambda item: item["supernet_loss"])
+    ]
+    by_standalone = [
+        row["arch_id"]
+        for row in sorted(ranking["candidates"], key=lambda item: item["standalone_loss"])
+    ]
+    recall_rows = []
+    for k in (1, 3, 5):
+        if k > len(by_standalone):
+            continue
+        hits = len(set(by_supernet[:k]) & set(by_standalone[:k]))
+        recall_rows.append([f"recall@{k}", f"{hits}/{k}", f"{k / len(by_standalone):.2f}"])
+
     depth_counts = ", ".join(f"{key}: {value}" for key, value in stats["depth_counts"].items())
     kernel_counts = ", ".join(f"{key}: {value}" for key, value in stats["kernel_counts"].items())
 
@@ -299,7 +314,8 @@ def build_report(context: dict, out_path: Path) -> Path:
             ("trap", "6 陷阱：排序不一致"),
             ("budget", "7 预算记账"),
             ("run", "8 复现与教学安排"),
-            ("refs", "9 参考文献"),
+            ("exercises", "9 自己动手"),
+            ("refs", "10 参考文献"),
         )
     )
 
@@ -353,6 +369,21 @@ def build_report(context: dict, out_path: Path) -> Path:
   但训练只发生在<b>一份 {_millions(params["supernet"])} 参数的权重</b>上。这就是权重共享省下来的东西。</p>
 
   <div class="note"><b>关键区别</b>：超网省的是“训练”，不省“测量”。延迟 / FLOPs 这类目标仍然要单独测，或查表。</div>
+
+  <h3>先对齐几个词</h3>
+  {_table(
+      ["术语", "本仓库里的含义"],
+      [
+          ["超网 supernet", "按最宽/最深配置分配的一份权重，所有子网共享它"],
+          ["子网 subnet", "超网的一个切片：深度取前 L 层、宽度取前 d 通道、每层选一条 FFN 分支；用 SubnetSpec 描述"],
+          ["弹性 elastic", "某个维度可大可小：深度、宽度、head 大小、FFN 分支"],
+          ["三明治规则", "每步固定训练 max + min + 若干随机子网，损失求和后只做一次 optimizer step"],
+          ["one-shot", "只训练一次超网，之后不再改权重，只在里面取子网打分"],
+          ["排序一致性", "超网内打分得到的排序，与每个子网独立训练后排序的一致程度（Kendall τ / Spearman ρ）"],
+          ["regret", "信任超网 top-1 的选择、而不是真实最好子网，所付出的精度/损失代价"],
+          ["evaluator_kind", "记账字段：这次数字是“共享权重下的代理分”还是“独立训练后的真实分”"],
+      ],
+  )}
 </section>
 
 <section id="space">
@@ -373,6 +404,35 @@ def build_report(context: dict, out_path: Path) -> Path:
   )}
   <p>一个具体的子网长这样（本次运行里随机抽到的一个）：</p>
 <pre class="ascii">{html.escape(context["example_spec"])}</pre>
+  <h3>每一层那三个字段到底是什么意思</h3>
+  <p>逐层可搜索的只有三项，其余都是全局或写死的。一个 block 的实际计算是：</p>
+<pre class="ascii">x = x + Attention( LayerNorm(x) )                       ← 宽度 / head 数来自全局 embed_dim、head_dim
+x = x + conv1d_k( LayerNorm(x) , out = dim x ratio )    ← kernel、ratio 来自这一层
+        -> activation(...) -> conv1d_1( out = dim )</pre>
+  {_table(
+      ["字段", "取值", "含义", "落到模型上"],
+      [
+          ["ffn_ratio", " / ".join(str(item) for item in space["ffn_ratios"]),
+           "FFN 隐藏层宽度倍数：hidden = embed_dim x ratio",
+           "选哪条分支；分支容量按 max_dim x ratio 分配，再切前 dim x ratio 个通道"],
+          ["ffn_kernel", " / ".join(str(item) for item in space["ffn_kernels"]),
+           "FFN 第一个 Conv1d 的卷积核大小",
+           "k=1 只看当前 token；k=3 / 5 会把相邻 token（本任务是相邻图像行）卷进来"],
+          ["activation", " / ".join(space["activations"]),
+           "FFN 里的激活函数", "无参数，运行时按名字切换函数"],
+          ["（全局）embed_dim / head_dim", "见上表", "宽度与 head 大小，所有层共用",
+           "head 数 = embed_dim / head_dim；注意力输出投影取左上块"],
+          ["（全局）depth", f"{space['min_depth']}–{space['max_depth']}", "只跑前 L 层",
+           "截断，不复制权重"],
+      ],
+  )}
+  <div class="warn"><b>记账坑：arch_id 只对“可搜索变量”做哈希。</b>
+  <code class="inline">arch_id</code> 覆盖 depth / embed_dim / head_dim / layers 四项。
+  如果你改了写死的部分（池化方式、归一化类型、注意力是否遮挡、位置编码），
+  <b>arch_id 一个字符都不会变，但模型已经不是同一个了</b>。
+  所以实验记录必须把 <code class="inline">arch_id</code> 和空间定义
+  （<code class="inline">space.to_dict()</code>）成对保存——本仓库的
+  <code class="inline">metrics.json</code> 就是这么存的。</div>
   <div class="warn"><b>为什么 FFN 用“分支”而宽度用“切片”？</b> 切片只在“同一组权重的前缀”有意义时才等价于一个真实的窄模型。
   通道维度可以取前缀（前 d 个通道），卷积核大小不行——k=5 的卷积核没有“前 3 个”这种子结构，所以 kernel 只能并列存放、整支激活。</div>
 </section>
@@ -386,6 +446,13 @@ def build_report(context: dict, out_path: Path) -> Path:
   {_code("supernet/modules.py", "elastic-ffn")}
   <p>整网前向就变成“截断深度 + 一路切片”：</p>
   {_code("supernet/supernet.py", "supernet-forward")}
+
+  <h3>注意力也一起变窄</h3>
+  <p>宽度不只影响 FFN。qkv 卷积的输出通道按 3 x max_dim 分配，窄子网只取前 3 x dim 行；
+  这 3 x dim 行按 (q, k, v) 三段切开后，每段恰好是“前 heads 个 head”，所以 head 数是
+  <code class="inline">dim / head_dim</code> 自然跟着宽度变。输出投影则取左上 dim x dim 的块。</p>
+  <p>这就是为什么 <code class="inline">head_dim</code> 也要放进搜索空间：固定宽度下，head_dim 小意味着更多 head（更细的注意力），
+  但每个 head 的维度更小。两者都受同一份共享权重的切片约束。</p>
   <div class="warn"><b>这是近似，不是等价。</b> 取“前 d 个通道”得到的窄卷积，参数值继承自宽子网，但没有单独训练过；
   导出子网上线前需要 fine-tune。另外，本仓库用 LayerNorm，所以导出时不需要重估统计量；如果换成 BatchNorm，
   必须用一批数据重新校准 BN（BN re-estimation），否则精度会明显掉。</div>
@@ -419,6 +486,19 @@ def build_report(context: dict, out_path: Path) -> Path:
   <h2>5 一次训练得到一个子网族<span class="tag">收益</span></h2>
   <p>训练结束后，同一份权重里可以取出任意多的子网并立刻打分。下面是<b>没有额外训练</b>的两次扫描：固定最大宽度扫深度 4→10，固定最大深度扫宽度。</p>
   {_figure(figures, "family", "左：深度扫描；右：参数-质量散点，两条曲线都来自同一份共享权重。")}
+  <h3>这两条曲线怎么读</h3>
+  <ul>
+    <li><b>曲线为什么几乎平？</b> 本次 depth 从 {space["min_depth"]} 加到 {space["max_depth"]}，
+    准确率只动了不到 1 个点——说明这个任务在当前训练量下<b>深度已经饱和</b>，
+    而不是“深度没用”。判断依据：更深的子网更容易欠训（见第 4 节覆盖图，depth 10 只在 max 腿每步出现）。
+    </li>
+    <li><b>为什么宽度更有效？</b> 宽度直接影响每层的通道数，也影响 head 数；同样的训练步数下，
+    宽子网拿到的梯度更多（每次更新的参数更多），所以低宽度端掉得更快。</li>
+    <li><b>右图怎么用？</b> 每一点都是一个“可直接部署”的配置：横轴是成本（参数量），纵轴是质量。
+    选模型就是在左上角找点——这就是超网真正交付的东西：<b>一条成本-质量曲线，而不是一个架构</b>。</li>
+    <li><b>注意非单调。</b> 宽度扫描里更宽的子网偶尔更差（本次 w96 就低于 w64），
+    这不是 bug，而是“训练不均衡 + 评测噪声”的体现，值得让学生自己找反例。</li>
+  </ul>
   <h3>深度扫描明细</h3>
   {_table(["depth", "参数量", "验证损失", "验证准确率"], depth_rows)}
   <h3>极端子网与随机子网</h3>
@@ -455,6 +535,13 @@ def build_report(context: dict, out_path: Path) -> Path:
       candidate_rows,
       candidate_classes,
   )}
+  <h3>τ 不够用：搜索真正关心的是 recall@k</h3>
+  <p>τ 衡量<b>全序</b>是否一致，而搜索只关心一件事：<b>真实最好的几个子网，有没有被超网排进前 k 名</b>。
+  这两个指标可以不一致，所以两份都该报。</p>
+  {_table(["指标", "本次实测", "随机基线"], recall_rows)}
+  <p>如果 recall@k 和随机基线差不多，那就不能拿超网当筛选器——本次正处在边缘：
+  recall@1 为 0，recall@3 与基线持平。用法判断标准：τ &gt; 0.7 可当可靠代理；
+  0.3–0.7 只能粗筛且必须复核；τ &lt; 0.3 基本无效（阈值任务相关，需自己量）。</p>
   <div class="warn"><b>教学要点</b>：τ 只有 {_fmt(ranking["kendall_tau"], 2)}，说明“超网最优”这个结论并不天然可信。
   样本量小（{ranking["num_candidates"]} 个候选）时 τ 的置信区间很宽，所以上面的数字只用于<b>演示方法</b>，不作为结论。</div>
   <h3>那超网还能用吗？三种安全用法</h3>
@@ -516,10 +603,71 @@ tests/test_supernet.py 40 个回归测试</pre>
   </div>
   <p style="color:var(--muted);font-size:12.5px">参考答案、45 分钟课堂节奏、常见误答见仓库里的
   <code class="inline">docs/instructor_notes.md</code>（教师用，不随报告重新生成）。</p>
+
+  <h3>读完应该能回答</h3>
+  <ol>
+    <li>超网省下了什么、又<b>没有</b>省下什么？（训练 vs 测量）</li>
+    <li>为什么通道可以切片、卷积核不行、深度用截断就够了？</li>
+    <li>三明治里为什么必须同时有 max 和 min 两条腿，去掉一条会坏在哪？</li>
+    <li>怎么从一次训练里读出“成本-质量曲线”，而不是一个架构？</li>
+    <li>τ 和 recall@k 差在哪，为什么搜索要报后者？</li>
+    <li>什么情况下“超网内指标”绝对不能写进论文数字？</li>
+  </ol>
+</section>
+
+<section id="exercises">
+  <h2>9 自己动手<span class="tag">练习</span></h2>
+  <p>下面每个实验都保留原来的评估口径（同一批测试图、同样的独立训练步数），所以结果可以直接和本节上面的数字对比。</p>
+  <h3>六个可以现场改的地方</h3>
+  <p>每个都只需要一条命令或几行代码，改完重跑一次，把“换了个旋钮会发生什么”变成学生自己的观察。</p>
+  {_table(
+      ["改什么", "怎么改", "看哪里"],
+      [
+          ["只留 max + min 两条腿",
+           "<code class=\"inline\">--n-random 0</code>",
+           "第 4 节覆盖图会明显变窄；随机子网精度下降——证明“覆盖”不是白来的"],
+          ["训练量砍到很小",
+           "<code class=\"inline\">--steps 200 --budget 60</code>",
+           "第 6 节的 τ 和 recall@k 会一起变差：超网质量决定排序可用性"],
+          ["缩小 FFN 分支集合",
+           "search_space.py 里 FfnKernels 改成 (1, 3)",
+           "空间候选数、覆盖直方图、以及第 5 节曲线是否更平"],
+          ["换划分方式",
+           "search_space.py 里 EMBED_DIMS 增加一个宽度",
+           "第 5 节右图会多一个点，看它落在成本-质量曲线的哪个位置"],
+          ["换池化方式",
+           "supernet.py 里 mean 改成取最后一个 token",
+           "精度与第 5 节扫描曲线的变化（分类任务里池化选择影响很大）"],
+          ["只改报告文案",
+           "<code class=\"inline\">PYTHONPATH=. python3 examples/render_report.py</code>",
+           "秒级重渲染，不重新训练，数字保持不变"],
+      ],
+  )}
+  <h3>两次消融的实测结果</h3>
+  <p>这不是本页那一次运行的数字，而是另外跑的两次（同机、同评估口径：同一批测试图，每个候选独立训练 120–150 步），每次只改一个设置：</p>
+  {_table(
+      ["配置", "训练步数", "max 子网", "min 子网", "随机子网", "宽度 w64 / w96", "Kendall τ"],
+      [
+          ["完整三明治（本页那次）", "1826", "98.1%", "96.9%", "93.0%", "95.8% / 92.8%", "+0.33"],
+          ["只留 max + min（<code class=\"inline\">--n-random 0</code>）", "600", "92.5%", "95.2%",
+           "<b>20.8%</b>", "<b>48.8% / 44.7%</b>", "+0.20"],
+          ["训练量砍到 200 步（<code class=\"inline\">--steps 200</code>）", "200", "84.8%", "77.7%",
+           "60.2%", "72.0% / 76.1%", "<b>-0.20</b>"],
+      ],
+  )}
+  <p>看中间那一行：<b>去掉随机腿之后，两端依然健康（max 92.5%、min 95.2%），但中间地带塌了</b>——
+  宽度 w64/w96 从 95.8%/92.8% 掉到 48.8%/44.7%，随机采样子网从 93.0% 掉到 20.8%。
+  所以三明治的三条腿各管一段：<b>max 管上限、min 管下限、随机腿管中间地带</b>，缺哪条就塌哪段。</p>
+  <p>最后一行则说明另一件事：训练量不足时，不只是精度低，<b>连排序都会从正相关翻成负相关</b>（τ +0.33 → -0.20）。
+  τ 不是超网的固有属性，而是“超网 + 训练量”的属性。</p>
+
+  <div class="note"><b>建议的第一次实验</b>：把 <code class="inline">--steps</code> 从默认值砍到 200，
+  再对比第 6 节的 τ / recall@k。你会看到“超网内排序”从“勉强可用”变成“完全不可用”——
+  这比任何文字都更能说明：<b>超网分数是代理，不是结论</b>。</div>
 </section>
 
 <section id="refs">
-  <h2>9 参考文献<span class="tag">出处</span></h2>
+  <h2>10 参考文献<span class="tag">出处</span></h2>
   <ul>
     <li>Bender et al. <i>Understanding and Simplifying One-Shot Architecture Search</i>. <a href="https://arxiv.org/abs/1802.01548">arXiv:1802.01548</a></li>
     <li>Pham et al. <i>Efficient Neural Architecture Search via Parameter Sharing</i>. <a href="https://arxiv.org/abs/1802.03268">arXiv:1802.03268</a></li>
