@@ -4,5 +4,6 @@ __pycache__/
 data/
 report/figures/
 report/sandwich_log.jsonl
+report/supernet.pt
 .mplcache/
 .idea/

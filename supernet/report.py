@@ -368,6 +368,8 @@ def build_report(context: dict, out_path: Path) -> Path:
     <span class="pill">类别 {dataset["num_classes"]}</span>
     <span class="pill">device {run["device"]} · batch {run["batch_size"]}</span>
     <span class="pill">lr {run["lr"]}</span>
+    <span class="pill">KD λ={run.get("distill_weight", 0.0)}</span>
+    <span class="pill">PS {f"{run['shrink_stages']} 级" if run.get("shrink_stages", 0) > 1 else "关"}</span>
     <span class="pill">总耗时 {run["wall_seconds"]:.0f}s</span>
     <span class="pill">生成于 {html.escape(run["started_at"])}</span>
   </div>
@@ -500,21 +502,24 @@ x = x + conv1d_k( LayerNorm(x) , out = dim x ratio )    ← kernel、ratio 来�
   {_code("supernet/sandwich.py", "sandwich-step")}
   {_figure(figures, "sandwich", "三条腿的损失曲线：max 最低、min 最高、随机子网位于中间。细线是原始值，粗线是滑动平均。")}
 
-  <h3>两个可选开关：渐进收缩与子网蒸馏（默认关）</h3>
+  <h3>两个开关：渐进收缩（默认关）与子网蒸馏（默认开）</h3>
   {_table(
       ["开关", "怎么开", "做什么"],
       [
           ["渐进收缩 PS", "<code class=\"inline\">--shrink-stages 4</code>",
            "从最大配置开始训练，分 4 段逐级解锁更小的深度 / 宽度 / 卷积核；"
-           "每段内的 min 腿是“当前前沿”而不是全局最小"],
-          ["子网蒸馏 KD", "<code class=\"inline\">--distill-weight 0.5</code>",
+           "每段内的 min 腿是“当前前沿”而不是全局最小", "关（0）"],
+          ["子网蒸馏 KD（默认开）", "<code class=\"inline\">--distill-weight 0.5</code>",
            "用 max 腿的 logits 当教师，其余腿的损失变成 (1-λ)·CE + λ·KL(student, teacher)"],
       ],
   )}
-  <p>为什么默认关闭：两者都和预算强耦合。渐进收缩的<b>前段每步更贵</b>——实测四条腿全是最大子网时
-  128.5 ms/步，而混合腿是 73.4 ms/步；固定预算下这会把步数压掉三到四成。
-  蒸馏几乎不加计算，但它把小容量子网往大子网的输出分布上拉，<b>教师自己训得不够好时是负收益</b>。
-  三组同预算的实测对照见仓库里的 <code class="inline">docs/comparison.md</code>。</p>
+  <p><b>为什么 PS 默认关</b>：它的前段每步更贵——实测四条腿全是最大子网时 128.5 ms/步，
+  而混合腿只有 73.4 ms/步；固定预算下步数被压掉三到四成，小尺寸解锁太晚、来不及训。
+  同预算实测 min 子网从 96.2% 掉到 78.0%。</p>
+  <p><b>为什么 KD 默认开</b>：教师就是本来就要算的 max 腿，<b>不增加任何一次前向</b>，
+  所以墙钟和步数完全不变，而实测把随机子网从 93.0% 抬到 97.0%、w64 从 93.6% 抬到 95.8%。
+  唯一的风险是教师本身欠训时会把错误传下去，所以取 λ=0.5 而不是 1.0。
+  两组同预算对照见 <code class="inline">docs/comparison.md</code>。</p>
 
   <h3>这条规则的出处，以及它和 OFA 是什么关系</h3>
   <p><b>不是“改进版 OFA”，反而是 OFA 用了这条规则。</b>按时间线：</p>
@@ -542,8 +547,8 @@ x = x + conv1d_k( LayerNorm(x) , out = dim x ratio )    ← kernel、ratio 来�
            "可选开启（<code class=\"inline\">--shrink-stages 4</code>），默认关",
            "默认的联合训练下中间与小尺寸早期欠训：本次 min 子网 96.9% 低于 max 的 98.1%"],
           ["子网之间做知识蒸馏（KL 对齐 teacher logits）",
-           "可选开启（<code class=\"inline\">--distill-weight 0.5</code>），默认关",
-           "默认只有共享权重带来的隐式影响，没有显式教师信号"],
+           "有，且<b>默认开启</b>（λ=0.5，可用 <code class=\"inline\">--distill-weight</code> 调整）",
+           "小/随机子网精度明显更高，墙钟不变"],
           ["BN 重估 + 导出子网 fine-tune", "不需要 BN 重估（本实现用 LayerNorm）；导出也仍未 fine-tune",
            "导出的子网精度低于它在超网里“应得”的水平"],
           ["弹性分辨率、真实延迟目标", "只有参数量代理",

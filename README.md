@@ -25,9 +25,10 @@ PYTHONPATH=. python3 examples/run_demo.py --budget 60 --steps 300 --candidates 4
 # 完全离线（合成条形图任务，不下载任何数据）
 PYTHONPATH=. python3 examples/run_demo.py --dataset bars
 
-# 两个 OFA 部件：默认关闭，可单独打开（见 docs/comparison.md 的实测对照）
-PYTHONPATH=. python3 examples/run_demo.py --shrink-stages 4        # 渐进收缩
-PYTHONPATH=. python3 examples/run_demo.py --distill-weight 0.5     # 子网蒸馏
+# 两个 OFA 部件：子网蒸馏默认开（λ=0.5），渐进收缩默认关
+PYTHONPATH=. python3 examples/run_demo.py --distill-weight 0.0     # 关掉蒸馏（对照用）
+PYTHONPATH=. python3 examples/run_demo.py --shrink-stages 4        # 打开渐进收缩
+PYTHONPATH=. python3 examples/run_demo.py --save-weights            # 存 supernet.pt，供事后导出/微调
 ```
 
 需要 Python 3.10+ 和 PyTorch 2.0+，绘图用 matplotlib，全程只用 Conv1d（没有 `nn.Linear`）。
@@ -38,9 +39,12 @@ PYTHONPATH=. python3 examples/run_demo.py --distill-weight 0.5     # 子网蒸�
 （约 100 vs 134 ms）却是两倍的图片量，所以 MPS 默认取 128。
 用 `--device cpu` 可以对拍。
 
-参考结果（M5 Pro，MPS，batch 128，204 秒，1166 步 ≈ 2.5 个 epoch）：max 子网 **97.6%**、min 子网 **94.9%**，
-深度扫描 d4→d10 = 96.3 / 96.4 / 97.0 / 97.0 / 97.1 / 97.3 / 97.6%，宽度扫描 w64/96/128 = 93.7 / 95.5 / 97.6%，
-Kendall τ ≈ 0.16、recall@3 = 2/3（随机基线 0.30）。
+参考结果（M5 Pro，MPS，batch 128，KD λ=0.5，204 秒，1249 步 ≈ 2.7 个 epoch）：
+max 子网 **98.8%**、min 子网 **96.2%**、随机子网 **96.7%**；
+深度扫描 d4→d10 = 98.5 / 98.6 / 98.7 / 98.6 / 98.8 / 99.0 / 98.8%，
+宽度扫描 w64/96/128 = 95.9 / 96.3 / 98.8%；
+Kendall τ ≈ +0.33、recall@5 = 4/5、recall@3 = 0/3（随机基线 0.30）——排序仍然不可靠，见报告第 6 节。
+（重跑会有 ±1pt 抖动；这些数字与仓库里提交的 `report/metrics.json` 一致。）
 脚本按 `--budget` 自适应：先热身测速，再把剩余时间分给三明治训练、排序实验和出图，
 所以慢机器上也是“大约 5 分钟以内”，而不是“跑一夜”。
 
@@ -90,6 +94,7 @@ examples/run_demo.py      端到端演示，带墙钟时间预算
 examples/render_report.py 只重渲染 HTML（改文案不用重新训练）
 docs/instructor_notes.md  教师用：课堂节奏 + 三个问题的参考答案
 docs/comparison.md        三组同预算实测：joint / 渐进收缩 / 子网蒸馏
+docs/finetune.md          导出子网的微调配方与实测收益
 tests/test_supernet.py    35 个回归测试
 ```
 
@@ -122,10 +127,14 @@ optimizer.step()
 
 max 子网是质量上限兼“教师”，min 子网防止低端掉队，随机子网覆盖中间地带。
 
-**3. 两个 OFA 部件做成了开关，默认关。** 渐进收缩（`--shrink-stages N`）与子网蒸馏
-（`--distill-weight λ`）都实现了，但默认不生效——它们和预算强耦合。同预算实测
-（`docs/comparison.md`）：**蒸馏几乎免费且把随机子网从 93.0% 抬到 97.0%；渐进收缩在这个小预算下
-反而把 min 子网从 96.2% 打到 78.0%**，因为解锁太晚、前段单步更贵。
+**3. 两个 OFA 部件都做了，默认值按实测定。** 子网蒸馏（`--distill-weight`）**默认开启 λ=0.5**：
+教师就是本来就要算的 max 腿，不增加任何一次前向，实测把随机子网从 93.0% 抬到 97.0%、w64 从 93.6% 抬到 95.8%，
+墙钟与步数不变。渐进收缩（`--shrink-stages N`）**默认关闭**：它前段单步更贵、小尺寸解锁太晚，
+同预算实测把 min 子网从 96.2% 打到 78.0%。完整对照见 `docs/comparison.md`。
+
+**3b. 导出的子网可以再微调。** `Supernet.export_subnet(spec)` 拿到的是切片副本，
+`rank.fine_tune_subnet(...)` 用 3e-4 的学习率单独训它几百步即可专化；
+实测收益随子网欠训程度上升（随机子网 +12.4pt、min +5.8pt、max +1.9pt），见 `docs/finetune.md`。
 
 **4. 排序一致性要显式量。** 超网内损失低 ≠ 独立训练后也好（co-adaptation）。
 `rank.py` 抽 K 个候选，先用超网打分，再把每个候选**从零独立训练同样步数**打分，

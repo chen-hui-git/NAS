@@ -27,6 +27,7 @@ from supernet import (  # noqa: E402
     build_dense_subnet,
     build_shrink_schedule,
     classification_loss,
+    fine_tune_subnet,
     kendall_tau,
     make_task,
     normalize_images,
@@ -528,6 +529,29 @@ class DistillationTests(unittest.TestCase):
                 classification_loss(trainer.model(inputs, TEST_SPACE.max_subnet()), labels)
             )
         self.assertAlmostEqual(record.role_losses["max"], expected, places=4)
+
+
+class FineTuneTests(unittest.TestCase):
+    def test_fine_tune_leaves_the_supernet_untouched(self) -> None:
+        torch.manual_seed(0)
+        trainer = SandwichTrainer(TEST_SPACE, SandwichConfig(n_random=1, seed=0))
+        spec = TEST_SPACE.min_subnet()
+        shared_before = next(iter(trainer.model.export_subnet(spec).parameters())).detach().clone()
+        tuned = fine_tune_subnet(
+            trainer.model, spec, TEST_TASK, steps=3, lr=1e-3, batch_size=4
+        )
+        tuned_param = next(iter(tuned.parameters())).detach()
+        shared_after = next(iter(trainer.model.export_subnet(spec).parameters())).detach()
+        self.assertFalse(torch.equal(shared_before, tuned_param))
+        self.assertTrue(torch.equal(shared_before, shared_after))
+
+    def test_fine_tuned_model_still_evaluates(self) -> None:
+        torch.manual_seed(0)
+        trainer = SandwichTrainer(TEST_SPACE, SandwichConfig(n_random=1, seed=0))
+        spec = TEST_SPACE.max_subnet()
+        tuned = fine_tune_subnet(trainer.model, spec, TEST_TASK, steps=2, batch_size=4)
+        batches = TEST_TASK.fixed_batches(4, 2, seed=1)
+        self.assertGreaterEqual(subnet_accuracy(tuned, spec, batches), 0.0)
 
 
 if __name__ == "__main__":

@@ -100,6 +100,36 @@ def train_standalone(
     return model
 
 
+def fine_tune_subnet(
+    supernet: Supernet,
+    spec: SubnetSpec,
+    task: Task,
+    *,
+    steps: int = 300,
+    lr: float = 3e-4,
+    batch_size: int = 128,
+    seed: int = 0,
+) -> Supernet:
+    """Export one subnet and keep training it alone: post-hoc specialization.
+
+    The exported model starts from the shared supernet's sliced weights, so its first
+    score is exactly its in-supernet score. The learning rate is a tenth of the pretraining
+    one because those weights are already trained; a few hundred steps is usually enough.
+    Nothing here touches the supernet, so other subnets stay unaffected.
+    """
+    model = supernet.export_subnet(spec).to(getattr(task, "device", "cpu"))
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+    batch_fn = task.batch_fn(batch_size, seed=seed)
+    model.train()
+    for step in range(steps):
+        inputs, labels = batch_fn(step)
+        optimizer.zero_grad(set_to_none=True)
+        classification_loss(model(inputs, spec), labels).backward()
+        optimizer.step()
+    model.eval()
+    return model
+
+
 def kendall_tau(supernet_scores: list[float], standalone_scores: list[float]) -> float:
     """Kendall tau-a over all pairs; ties inside a pair count as neither."""
     concordant = 0
