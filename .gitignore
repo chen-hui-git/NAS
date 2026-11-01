@@ -5,3 +5,4 @@ data/
 report/figures/
 report/sandwich_log.jsonl
 .mplcache/
+.idea/
