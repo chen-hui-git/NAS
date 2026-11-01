@@ -310,7 +310,9 @@ x = x + conv1d_k( LayerNorm(x) , out = dim x ratio )    ← kernel、ratio 来�
   <p><b>为什么 KD 默认开</b>：教师就是本来就要算的 max 腿，<b>不增加任何一次前向</b>，
   所以墙钟和步数完全不变，而实测把随机子网从 93.0% 抬到 97.0%、w64 从 93.6% 抬到 95.8%。
   唯一的风险是教师本身欠训时会把错误传下去，所以取 λ=0.5 而不是 1.0。
-  两组同预算对照见 <code class="inline">docs/comparison.md</code>。</p>
+  两组同预算对照见 <code class="inline">docs/comparison.md</code>；
+  完整清单（OFA 还有哪些部件本仓库没做、以及补齐优先级）见
+  <code class="inline">docs/ofa_gap.md</code>。</p>
 
   <h3>这条规则的出处，以及它和 OFA 是什么关系</h3>
   <p><b>不是“改进版 OFA”，反而是 OFA 用了这条规则。</b>按时间线：</p>
@@ -498,7 +500,7 @@ tests/test_supernet.py 35 个回归测试</pre>
 </section>
 
 <footer>
-  由 <code class="inline">examples/run_demo.py</code> 自动生成 · 2026-11-01 17:47:18 ·
+  由 <code class="inline">examples/run_demo.py</code> 自动生成 · 2026-11-01 17:51:08 ·
   图中标签使用英文，因为 matplotlib 默认字体没有中文字形。
 </footer>
 

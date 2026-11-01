@@ -100,6 +100,7 @@ examples/render_report.py 只重渲染 HTML（改文案不用重新训练）
 docs/notes.md             开放问题与常见误区（带实测数字，不随运行变化）
 docs/comparison.md        三组同预算实测：joint / 渐进收缩 / 子网蒸馏
 docs/finetune.md          导出子网的微调配方与实测收益
+docs/ofa_gap.md           OFA 有、本 Demo 没做的部件清单（含补齐优先级）
 tests/test_supernet.py    35 个回归测试
 ```
 
