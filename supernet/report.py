@@ -727,7 +727,10 @@ tests/test_supernet.py 35 个回归测试</pre>
   <b>在同一环境、固定 <code class="inline">--steps</code>、同 seed 下可逐位复现；只给 <code class="inline">--budget</code> 时只能复现量级。</b>
   本次记录：seed = {run.get("seed", "?")}，commit = {run.get("git_commit", "?")}，
   torch {run.get("torch_version", "?")}，device {run["device"]}，确定性算子 =
-  {"开" if run.get("deterministic") else "关"}。</div>
+  {"开" if run.get("deterministic") else "关"}。
+  <br>commit 末尾的 <code class="inline">+dirty</code> 表示写入时源码目录还有未提交改动；
+  生成物（<code class="inline">report/</code>）不算在内——所以拿到 <code class="inline">+dirty</code>
+  就说明这份数字对应的代码不是某个 commit 的干净状态。</div>
 
   <h3>读完应该能回答</h3>
   <ol>

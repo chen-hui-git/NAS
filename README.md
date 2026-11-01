@@ -32,9 +32,10 @@ PYTHONPATH=. python3 examples/run_demo.py --distill-weight 0.5     # 子网蒸�
 
 需要 Python 3.10+ 和 PyTorch 2.0+，绘图用 matplotlib，全程只用 Conv1d（没有 `nn.Linear`）。
 
-设备自动选：有 Apple GPU 时用 `mps`（batch 64），否则 `cpu`（batch 8）。
+设备自动选：有 Apple GPU 时用 `mps`（batch 128），否则 `cpu`（batch 8）。
 这两个数字是**实测**出来的，不是猜的：`F.conv1d` 在 batch ≥ 16 时会掉进一个慢 6~10 倍的路径
-（batch 8: 每图 9626/s，batch 16: 1666/s），而 MPS 上 batch 64 又能跑到 2534/s。
+（batch 8: 每图 9626/s，batch 16: 1666/s），而 MPS 上 batch 64 与 128 的单步耗时几乎相同
+（约 100 vs 134 ms）却是两倍的图片量，所以 MPS 默认取 128。
 用 `--device cpu` 可以对拍。
 
 参考结果（M5 Pro，MPS，208 秒，1826 步 ≈ 1.9 个 epoch）：max 子网 **98.1%**、min 子网 **96.9%**，

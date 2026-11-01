@@ -64,7 +64,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--device", default="auto",
                         help="auto (mps when available, else cpu), cpu or mps")
     parser.add_argument("--batch-size", type=int, default=None,
-                        help="default 64 on mps, 8 on cpu: measured, not guessed")
+                        help="default 128 on mps, 8 on cpu: measured, not guessed")
     parser.add_argument("--lr", type=float, default=3e-3)
     parser.add_argument("--deterministic", action="store_true",
                         help="ask torch for deterministic kernels (cpu: usually fine, mps: may refuse)")
@@ -99,8 +99,11 @@ def git_state() -> str:
             ["git", "rev-parse", "--short", "HEAD"],
             cwd=root, stderr=subprocess.DEVNULL, text=True,
         ).strip()
+        # Only source files count: a run rewrites report/ artifacts, and those should
+        # not make the code look modified.
         dirty = subprocess.check_output(
-            ["git", "status", "--porcelain"],
+            ["git", "status", "--porcelain", "--",
+             "supernet", "tests", "examples", "docs", "README.md", ".gitignore"],
             cwd=root, stderr=subprocess.DEVNULL, text=True,
         ).strip()
         return commit + ("+dirty" if dirty else "")
@@ -167,8 +170,10 @@ def main(argv: list[str] | None = None) -> int:
             deterministic = True
         except Exception as error:  # backend refused: keep going, but record it
             print(f"  warning: deterministic algorithms unavailable ({error})")
+    # Measured on an M5 Pro: batch 64 and 128 cost almost the same per step
+    # (100 vs 134 ms) while 128 carries twice the images, so 128 is the better default.
     batch_size = args.batch_size if args.batch_size is not None else (
-        64 if device == "mps" else 8
+        128 if device == "mps" else 8
     )
     args.batch_size = batch_size
     say("=" * 68)
