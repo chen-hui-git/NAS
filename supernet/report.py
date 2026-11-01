@@ -345,8 +345,8 @@ def build_report(context: dict, out_path: Path) -> Path:
   <h3>这次的任务</h3>
   <p>MNIST 手写数字分类：一张 28×28 的图被看成 <b>{dataset["seq_len"]} 个 token</b>
   （每行一个 token，每行的 {dataset["input_features"]} 个像素值就是它的特征），
-  过完超网后做平均池化，再输出 {dataset["num_classes"]} 类 logits。选它就是因为“准确率”比“困惑度”好讲：
-  随机猜是 {run["chance_accuracy"] * 100:.0f}%。</p>
+  过完超网后做平均池化，再输出 {dataset["num_classes"]} 类 logits。
+  随机猜的准确率是 {run["chance_accuracy"] * 100:.0f}%，好坏一眼就能看懂。</p>
 
   <h3>本仓库这次覆盖了多大的空间？</h3>
   <p>空间里有 <b>{run["space_size"]:,}</b> 个不同的候选架构（深度 4–10 × 宽度 × 每层 FFN 分支 × 激活），
@@ -382,11 +382,6 @@ def build_report(context: dict, out_path: Path) -> Path:
   <p>切片只发生在 <code class="inline">forward</code> 里几行：权重按最大宽度分配，子网取前 <code class="inline">out_channels × in_channels</code> 那块。同一份参数因此同时服务宽子网和窄子网。</p>
   {_figure(figures, "slicing", "左：一个共享卷积核矩阵，窄子网只用左上角的块；右：每层并列的 FFN 分支，子网只激活一支。")}
   {_code("supernet/modules.py", "elastic-conv")}
-  <div class="warn"><b>如果拿这个骨架去做语言模型：注意因果性。</b>
-  本任务是分类，注意力不遮挡、Conv1d 用对称 padding 都没问题；但同一份代码挪去做自回归语言模型时，
-  序列 Conv1d 必须<b>只在左侧 padding</b>。否则 kernel 3 / 5 的 FFN 会读到位置 t+1 的残差流
-  （那里正好带着下一个 token 自己的 embedding），模型于是“照抄”答案，验证损失会掉到 0.002 这种不可能的值。
-  我们第一版就是这个 bug。</div>
   <p>FFN 的分支选择同样只是一个字典查找：</p>
   {_code("supernet/modules.py", "elastic-ffn")}
   <p>整网前向就变成“截断深度 + 一路切片”：</p>
@@ -499,7 +494,7 @@ def build_report(context: dict, out_path: Path) -> Path:
   <pre class="ascii">supernet/
   search_space.py   SubnetSpec / SearchSpace：纯数据的空间描述
   modules.py        ElasticConv1d / ElasticAttention / ElasticFFN 切片
-  supernet.py       共享权重模型、子网导出、文本生成
+  supernet.py       共享权重模型、子网导出、predict
   sandwich.py       三明治训练循环 + 覆盖统计
   rank.py           超网内打分 vs 独立训练，Kendall/Spearman
   tasks.py          任务接口（batch / fixed_batches / batch_fn）
