@@ -119,6 +119,16 @@ a { color: var(--accent); }
   <p>空间里有 <b>22,682,968,226,208</b> 个不同的候选架构（深度 4–10 × 宽度 × 每层 FFN 分支 × 激活），
   但训练只发生在<b>一份 18.42M 参数的权重</b>上。这就是权重共享省下来的东西。</p>
 
+  <h3>为什么超网（18.42M）比最大的子网（4.61M）还大？</h3>
+  <p>最大的子网是"所有维度都取最大"的角点（depth 10 / width 128 /
+  每层 ratio 4 与 kernel 5），但超网还比它大
+  4.0 倍。多出来的部分几乎全是<b>每层另外 8 条没被选中的 FFN 分支</b>：
+  宽度和深度可以切片，卷积核不行，所以 9 条分支只能各存一份。</p>
+  $<table><thead><tr><th>超网组成</th><th>参数量</th><th>说明</th></tr></thead><tbody><tr><td>注意力 ×10</td><td>660,480</td><td>qkv + 输出投影，按最宽分配</td></tr><tr><td>LayerNorm ×20</td><td>5,120</td><td>每层两个，按最宽分配</td></tr><tr><td>input_proj + 位置编码 + 分类头</td><td>8,842</td><td>输入/输出侧，随子网宽度一起伸缩</td></tr><tr><td><b>FFN 9 条分支 ×10</b></td><td><b>17,740,800</b></td><td>每层 9 条并列存放（卷积核无法切片）</td></tr><tr><td>↳ 其中最大子网用的 r4k5</td><td>3,938,560</td><td>最大子网每层都用这一条</td></tr><tr><td>↳ <b>其余 8 条未选中分支</b></td><td><b>13,802,240</b></td><td>别的子网要用，必须存着</td></tr><tr><td><b>超网合计</b></td><td><b>18,415,242</b></td><td>= 最大子网 + 每层另外 8 条分支</td></tr><tr><td>最大子网</td><td>4,613,002</td><td>= 超网 − 8 条未用分支，小 3.99 倍</td></tr></tbody></table><table><thead><tr><th>每层分支 (ratio, kernel)</th><th>参数量/层</th><th>×10 层</th></tr></thead><tbody><tr><td><code class="inline">r2k1</code></td><td>65,920</td><td>659,200</td></tr><tr><td><code class="inline">r2k3</code></td><td>131,456</td><td>1,314,560</td></tr><tr><td><code class="inline">r2k5</code></td><td>196,992</td><td>1,969,920</td></tr><tr><td><code class="inline">r3k1</code></td><td>98,816</td><td>988,160</td></tr><tr><td><code class="inline">r3k3</code></td><td>197,120</td><td>1,971,200</td></tr><tr><td><code class="inline">r3k5</code></td><td>295,424</td><td>2,954,240</td></tr><tr><td><code class="inline">r4k1</code></td><td>131,712</td><td>1,317,120</td></tr><tr><td><code class="inline">r4k3</code></td><td>262,784</td><td>2,627,840</td></tr><tr><td><code class="inline">r4k5</code></td><td>393,856</td><td>3,938,560</td></tr></tbody></table>
+  <div class="note"><b>所以 18.42M 不是"所有子网的参数量之和"</b>（那会是天文数字），
+  而是"每条可切换分支按最大形状各存一份"的<b>并集</b>；所有子网都是这份并集的切片：
+  取前 d 个通道、前 L 层、选其中一条分支。</div>
+
   <div class="note"><b>关键区别</b>：超网省的是“训练”，不省“测量”。延迟 / FLOPs 这类目标仍然要单独测，或查表。</div>
 
   <h3>先对齐几个词</h3>
@@ -228,7 +238,7 @@ x = x + conv1d_k( LayerNorm(x) , out = dim x ratio )    ← kernel、ratio 来�
   <div class="warn"><b>这是近似，不是等价。</b> 取“前 d 个通道”得到的窄卷积，参数值继承自宽子网，但没有单独训练过；
   导出子网上线前需要 fine-tune。另外，本仓库用 LayerNorm，所以导出时不需要重估统计量；如果换成 BatchNorm，
   必须用一批数据重新校准 BN（BN re-estimation），否则精度会明显掉。</div>
-  <div class="note">本次未跑微调对照（<code class="inline">--fine-tune-steps 0</code>）。</div>
+  <h3>“这是近似”的实测代价：导出后再微调能补多少</h3><p>把三个子网从超网里导出成独立模型（权重直接继承切片，所以 zero-shot 分数就等于它在超网内的分数），再用 150 步、lr=0.0003 单独训练这一个子网：</p><table><thead><tr><th>子网</th><th>参数量</th><th>zero-shot（超网内）</th><th>微调 150 步</th><th>收益</th></tr></thead><tbody><tr><td>max</td><td>4.61M</td><td>97.66%</td><td>98.91%</td><td>+1.25 pt</td></tr><tr><td>min</td><td>0.14M</td><td>95.70%</td><td>97.19%</td><td>+1.48 pt</td></tr><tr><td>random sample</td><td>0.39M</td><td>94.14%</td><td>97.42%</td><td>+3.28 pt</td></tr></tbody></table><p>收益与子网的<b>欠训程度</b>单调相关：越小的、分支越冷门的子网补得越多，最贵的 max 子网几乎补不动。这也说明“切片”继承来的权重对窄子网只是近似——上线某个具体子网前值得花这几百步（详见 <code class="inline">docs/finetune.md</code>）。</p>
 </section>
 
 <section id="sandwich">
@@ -488,7 +498,7 @@ tests/test_supernet.py 35 个回归测试</pre>
 </section>
 
 <footer>
-  由 <code class="inline">examples/run_demo.py</code> 自动生成 · 2026-11-01 17:37:23 ·
+  由 <code class="inline">examples/run_demo.py</code> 自动生成 · 2026-11-01 17:47:18 ·
   图中标签使用英文，因为 matplotlib 默认字体没有中文字形。
 </footer>
 

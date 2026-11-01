@@ -136,3 +136,40 @@ def _copy_conv(
 def _copy_norm(target: ElasticLayerNorm, source: ElasticLayerNorm, channels: int) -> None:
     target.weight.copy_(source.weight[:channels])
     target.bias.copy_(source.bias[:channels])
+
+def parameter_breakdown(space: SearchSpace) -> dict[str, object]:
+    """按组成拆解超网参数量（解析式，不需要实例化模型）。
+
+    超网把每条 FFN 分支都按最大形状各存一份，因为卷积核无法切片；宽度与深度则可以切片，
+    所以不必为每种宽度/层数再存一份。于是"超网 - 最大子网"几乎正好等于每层另外 8 条分支。
+    """
+    d = space.max_embed_dim
+    depth = space.max_depth
+    attention = (3 * d * d + 3 * d) + (d * d + d)
+    norms = 2 * (2 * d)
+    io = (
+        (space.input_features * d + d)
+        + d * space.max_seq_len
+        + 2 * d
+        + (space.num_classes * d + space.num_classes)
+    )
+    branches = {}
+    for ratio in space.ffn_ratios:
+        for kernel in space.ffn_kernels:
+            hidden = d * ratio
+            branches[f"r{ratio}k{kernel}"] = hidden * d * kernel + hidden + d * hidden + d
+    ffn_per_layer = sum(branches.values())
+    max_branch = f"r{max(space.ffn_ratios)}k{max(space.ffn_kernels)}"
+    total = depth * (attention + norms + ffn_per_layer) + io
+    return {
+        "supernet": total,
+        "attention": depth * attention,
+        "norms": depth * norms,
+        "io": io,
+        "ffn_all": depth * ffn_per_layer,
+        "ffn_max_branch": depth * branches[max_branch],
+        "ffn_unused": depth * (ffn_per_layer - branches[max_branch]),
+        "max_branch_key": max_branch,
+        "branches": branches,
+        "max_subnet": depth * (attention + norms + branches[max_branch]) + io,
+    }

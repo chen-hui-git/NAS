@@ -42,6 +42,7 @@ from supernet import (
     fine_tune_subnet,
     make_task,
     normalize_images,
+    parameter_breakdown,
     run_ranking_experiment,
     subnet_accuracy,
 )
@@ -522,6 +523,7 @@ def main(argv: list[str] | None = None) -> int:
             "dataset": task.describe(),
             "space": space.to_dict(),
             "params": {
+                "breakdown": parameter_breakdown(space),
                 "supernet": supernet_params,
                 "max": max_params,
                 "min": min_params,
@@ -574,6 +576,8 @@ def main(argv: list[str] | None = None) -> int:
             "ranking": ranking,
             "predictions": metrics["predictions"],
             "fine_tune": metrics["fine_tune"],
+            "breakdown": metrics["run"]["params"].get("breakdown")
+            or parameter_breakdown(space),
             "figures": figure_paths,
             "example_spec": json.dumps(example_spec, indent=2, ensure_ascii=False),
         }

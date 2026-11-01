@@ -264,6 +264,37 @@ def build_report(context: dict, out_path: Path) -> Path:
         )
         candidate_classes.append("bad" if disagree else "")
 
+    breakdown = context.get("breakdown") or {}
+    if breakdown:
+        ffn_depth = int(space["max_depth"])
+        branch_rows = [
+            [f'<code class="inline">{html.escape(key)}</code>', f"{value:,}", f"{value * ffn_depth:,}"]
+            for key, value in breakdown["branches"].items()
+        ]
+        breakdown_block = _table(
+            ["超网组成", "参数量", "说明"],
+            [
+                [f"注意力 ×{ffn_depth}", f"{breakdown['attention']:,}", "qkv + 输出投影，按最宽分配"],
+                [f"LayerNorm ×{2 * ffn_depth}", f"{breakdown['norms']:,}", "每层两个，按最宽分配"],
+                ["input_proj + 位置编码 + 分类头", f"{breakdown['io']:,}", "输入/输出侧，随子网宽度一起伸缩"],
+                [f"<b>FFN 9 条分支 ×{ffn_depth}</b>", f"<b>{breakdown['ffn_all']:,}</b>",
+                 "每层 9 条并列存放（卷积核无法切片）"],
+                [f"↳ 其中最大子网用的 {html.escape(breakdown['max_branch_key'])}",
+                 f"{breakdown['ffn_max_branch']:,}", "最大子网每层都用这一条"],
+                ["↳ <b>其余 8 条未选中分支</b>", f"<b>{breakdown['ffn_unused']:,}</b>", "别的子网要用，必须存着"],
+                ["<b>超网合计</b>", f"<b>{breakdown['supernet']:,}</b>", "= 最大子网 + 每层另外 8 条分支"],
+                ["最大子网", f"{breakdown['max_subnet']:,}",
+                 f"= 超网 − 8 条未用分支，小 {breakdown['supernet'] / breakdown['max_subnet']:.2f} 倍"],
+            ],
+        ) + _table(
+            ["每层分支 (ratio, kernel)", "参数量/层", f"×{ffn_depth} 层"],
+            branch_rows,
+        )
+    else:
+        breakdown_block = (
+            '<div class="note">本次 metrics.json 未记录参数分解；重跑一次即可显示。</div>'
+        )
+
     fine_tune = context.get("fine_tune") or {}
     fine_tune_rows = [
         [
@@ -426,6 +457,16 @@ def build_report(context: dict, out_path: Path) -> Path:
   <h3>本仓库这次覆盖了多大的空间？</h3>
   <p>空间里有 <b>{run["space_size"]:,}</b> 个不同的候选架构（深度 4–10 × 宽度 × 每层 FFN 分支 × 激活），
   但训练只发生在<b>一份 {_millions(params["supernet"])} 参数的权重</b>上。这就是权重共享省下来的东西。</p>
+
+  <h3>为什么超网（{_millions(params["supernet"])}）比最大的子网（{_millions(params["max"])}）还大？</h3>
+  <p>最大的子网是"所有维度都取最大"的角点（depth {space['max_depth']} / width {max(space['embed_dims'])} /
+  每层 ratio {max(space['ffn_ratios'])} 与 kernel {max(space['ffn_kernels'])}），但超网还比它大
+  {params['supernet'] / params['max']:.1f} 倍。多出来的部分几乎全是<b>每层另外 8 条没被选中的 FFN 分支</b>：
+  宽度和深度可以切片，卷积核不行，所以 9 条分支只能各存一份。</p>
+  ${breakdown_block}
+  <div class="note"><b>所以 {_millions(params["supernet"])} 不是"所有子网的参数量之和"</b>（那会是天文数字），
+  而是"每条可切换分支按最大形状各存一份"的<b>并集</b>；所有子网都是这份并集的切片：
+  取前 d 个通道、前 L 层、选其中一条分支。</div>
 
   <div class="note"><b>关键区别</b>：超网省的是“训练”，不省“测量”。延迟 / FLOPs 这类目标仍然要单独测，或查表。</div>
 

@@ -31,6 +31,7 @@ from supernet import (  # noqa: E402
     kendall_tau,
     make_task,
     normalize_images,
+    parameter_breakdown,
     run_ranking_experiment,
     spearman_rho,
     subnet_accuracy,
@@ -552,6 +553,25 @@ class FineTuneTests(unittest.TestCase):
         tuned = fine_tune_subnet(trainer.model, spec, TEST_TASK, steps=2, batch_size=4)
         batches = TEST_TASK.fixed_batches(4, 2, seed=1)
         self.assertGreaterEqual(subnet_accuracy(tuned, spec, batches), 0.0)
+
+
+class BreakdownTests(unittest.TestCase):
+    def test_analytic_breakdown_matches_the_model(self) -> None:
+        model = Supernet(TEST_SPACE)
+        breakdown = parameter_breakdown(TEST_SPACE)
+        self.assertEqual(breakdown["supernet"], sum(p.numel() for p in model.parameters()))
+        self.assertEqual(
+            breakdown["max_subnet"], model.subnet_parameter_count(TEST_SPACE.max_subnet())
+        )
+
+    def test_breakdown_parts_add_up(self) -> None:
+        breakdown = parameter_breakdown(TEST_SPACE)
+        per_layer = breakdown["ffn_all"] + breakdown["attention"] + breakdown["norms"]
+        self.assertEqual(per_layer + breakdown["io"], breakdown["supernet"])
+        self.assertEqual(
+            breakdown["ffn_max_branch"] + breakdown["ffn_unused"], breakdown["ffn_all"]
+        )
+        self.assertGreater(breakdown["ffn_unused"], 0)
 
 
 if __name__ == "__main__":

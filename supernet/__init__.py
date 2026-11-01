@@ -30,7 +30,7 @@ from .search_space import (
     point_space,
 )
 from .shrink import ShrinkStage, build_shrink_schedule, stage_at
-from .supernet import Supernet, copy_subnet_weights
+from .supernet import Supernet, copy_subnet_weights, parameter_breakdown
 from .synthetic import BarsTask
 from .tasks import MNIST_MEAN, MNIST_STD, Task, make_task, normalize_images
 
@@ -69,6 +69,7 @@ __all__ = [
     "kendall_tau",
     "make_task",
     "normalize_images",
+    "parameter_breakdown",
     "point_space",
     "run_ranking_experiment",
     "spearman_rho",

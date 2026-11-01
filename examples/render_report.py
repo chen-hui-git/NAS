@@ -17,6 +17,8 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from supernet import SearchSpace, parameter_breakdown
+from supernet import SearchSpace, parameter_breakdown
 from supernet.report import build_report
 
 LOGGER = logging.getLogger("supernet")
@@ -62,6 +64,18 @@ def main(argv: list[str] | None = None) -> int:
     # 按正文所显示的同一个 spec 重画示意图，这样即使 metrics.json 来自旧运行，
     # 图与文字也不会互相矛盾。
     space_meta = metrics["run"]["space"]
+    space = SearchSpace(
+        min_depth=space_meta["min_depth"],
+        max_depth=space_meta["max_depth"],
+        embed_dims=tuple(space_meta["embed_dims"]),
+        head_dims=tuple(space_meta["head_dims"]),
+        ffn_ratios=tuple(space_meta["ffn_ratios"]),
+        ffn_kernels=tuple(space_meta["ffn_kernels"]),
+        activations=tuple(space_meta["activations"]),
+        num_classes=space_meta["num_classes"],
+        input_features=space_meta["input_features"],
+        max_seq_len=space_meta["max_seq_len"],
+    )
     from supernet import viz
 
     viz.plot_slicing_schematic(
@@ -83,6 +97,9 @@ def main(argv: list[str] | None = None) -> int:
         "predictions": metrics["predictions"],
         "figures": figures,
         "example_spec": json.dumps(example_spec, indent=2, ensure_ascii=False),
+        "fine_tune": metrics.get("fine_tune", {}),
+        "breakdown": metrics["run"]["params"].get("breakdown")
+        or parameter_breakdown(space),
     }
     out = build_report(context, Path(args.out))
     LOGGER.info("wrote %s", out)
