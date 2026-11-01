@@ -80,8 +80,10 @@ supernet/
   synthetic.py      合成条形图任务（离线回退）
   viz.py            教学图（matplotlib，headless，英文标签）
   report.py         HTML 报告生成器（代码片段从源码里按标记抽取）
-examples/run_demo.py  端到端演示，带墙钟时间预算
-tests/test_supernet.py 37 个回归测试
+examples/run_demo.py      端到端演示，带墙钟时间预算
+examples/render_report.py 只重渲染 HTML（改文案不用重新训练）
+docs/instructor_notes.md  教师用：课堂节奏 + 三个问题的参考答案
+tests/test_supernet.py    40 个回归测试
 ```
 
 代码片段不是复制粘贴的：`report.py` 用 `# [snippet:name]` 标记从真实源文件里抽取，
@@ -130,7 +132,7 @@ max 子网是质量上限兼“教师”，min 子网防止低端掉队，随机
 5. 一次训练得到一个子网族（深度/宽度扫描曲线 + 参数量表 + 同一份权重的两个子网逐张预测）；
 6. 陷阱：排序不一致（散点图 + τ/ρ/regret + 逐候选对照表）；
 7. 预算记账（`evaluator_kind`、`subnets_per_step`、独立训练次数怎么记）；
-8. 45 分钟课堂节奏建议、复现命令、参考文献。
+8. 复现命令、文件结构、课堂讨论问题（**参考答案与 45 分钟课堂节奏在 `docs/instructor_notes.md`，教师用，不随报告生成**）。
 
 图中标签用英文，因为 matplotlib 默认字体没有中文字形。
 

@@ -126,30 +126,20 @@ a { color: var(--accent); }
   <table><thead><tr><th>维度</th><th>取值</th><th>弹性实现方式</th></tr></thead><tbody><tr><td>depth</td><td>4–10</td><td>截断：depth 为 L 的子网只跑前 L 层</td></tr><tr><td>embed_dim</td><td>64 / 96 / 128</td><td>切片：取共享权重的前 d 个通道</td></tr><tr><td>head_dim</td><td>16 / 32</td><td>切片：head 数 = embed_dim / head_dim</td></tr><tr><td>ffn_ratio</td><td>2 / 3 / 4</td><td>分支：每层 9 个 (ratio, kernel) 组合，选一支</td></tr><tr><td>ffn_kernel</td><td>1 / 3 / 5</td><td>分支：卷积核大小不能切片，只能并列存放</td></tr><tr><td>activation</td><td>gelu / silu</td><td>运行时切换：无参数</td></tr><tr><td>输入 / 类别</td><td>28×28 / 10</td><td>固定：每行像素是一个 token，所有子网共享同一输入输出形状</td></tr></tbody></table>
   <p>一个具体的子网长这样（本次运行里随机抽到的一个）：</p>
 <pre class="ascii">{
-  &quot;arch_id&quot;: &quot;f5befadca231&quot;,
+  &quot;arch_id&quot;: &quot;ddad76621de5&quot;,
   &quot;num_heads&quot;: 3,
-  &quot;depth&quot;: 7,
+  &quot;depth&quot;: 10,
   &quot;embed_dim&quot;: 96,
   &quot;head_dim&quot;: 32,
   &quot;layers&quot;: [
     {
       &quot;ffn_ratio&quot;: 3,
-      &quot;ffn_kernel&quot;: 5,
+      &quot;ffn_kernel&quot;: 1,
       &quot;activation&quot;: &quot;silu&quot;
     },
     {
-      &quot;ffn_ratio&quot;: 3,
-      &quot;ffn_kernel&quot;: 5,
-      &quot;activation&quot;: &quot;silu&quot;
-    },
-    {
-      &quot;ffn_ratio&quot;: 2,
-      &quot;ffn_kernel&quot;: 5,
-      &quot;activation&quot;: &quot;silu&quot;
-    },
-    {
-      &quot;ffn_ratio&quot;: 3,
-      &quot;ffn_kernel&quot;: 5,
+      &quot;ffn_ratio&quot;: 4,
+      &quot;ffn_kernel&quot;: 3,
       &quot;activation&quot;: &quot;silu&quot;
     },
     {
@@ -158,13 +148,38 @@ a { color: var(--accent); }
       &quot;activation&quot;: &quot;silu&quot;
     },
     {
-      &quot;ffn_ratio&quot;: 2,
-      &quot;ffn_kernel&quot;: 5,
+      &quot;ffn_ratio&quot;: 4,
+      &quot;ffn_kernel&quot;: 1,
       &quot;activation&quot;: &quot;gelu&quot;
     },
     {
-      &quot;ffn_ratio&quot;: 2,
-      &quot;ffn_kernel&quot;: 5,
+      &quot;ffn_ratio&quot;: 3,
+      &quot;ffn_kernel&quot;: 1,
+      &quot;activation&quot;: &quot;gelu&quot;
+    },
+    {
+      &quot;ffn_ratio&quot;: 4,
+      &quot;ffn_kernel&quot;: 3,
+      &quot;activation&quot;: &quot;gelu&quot;
+    },
+    {
+      &quot;ffn_ratio&quot;: 3,
+      &quot;ffn_kernel&quot;: 1,
+      &quot;activation&quot;: &quot;gelu&quot;
+    },
+    {
+      &quot;ffn_ratio&quot;: 4,
+      &quot;ffn_kernel&quot;: 3,
+      &quot;activation&quot;: &quot;silu&quot;
+    },
+    {
+      &quot;ffn_ratio&quot;: 4,
+      &quot;ffn_kernel&quot;: 1,
+      &quot;activation&quot;: &quot;silu&quot;
+    },
+    {
+      &quot;ffn_ratio&quot;: 3,
+      &quot;ffn_kernel&quot;: 3,
       &quot;activation&quot;: &quot;gelu&quot;
     }
   ]
@@ -360,10 +375,19 @@ a { color: var(--accent); }
   viz.py            教学图（matplotlib，headless）
   report.py         本页的 HTML 生成器
 examples/run_demo.py  端到端演示（带时间预算）
-tests/test_supernet.py 33 个回归测试</pre>
-  <h3>45 分钟课堂节奏（建议）</h3>
-  <table><thead><tr><th>分钟</th><th>内容</th><th>对应的本页章节</th></tr></thead><tbody><tr><td>0–7</td><td>普通 NAS 的成本；超网要解决的正是这个</td><td>1</td></tr><tr><td>7–17</td><td>弹性空间 + 切片：为什么通道能切、卷积核不能切</td><td>2 / 3</td></tr><tr><td>17–27</td><td>跑起来：观察三条腿的损失曲线与覆盖图</td><td>4</td></tr><tr><td>27–35</td><td>子网族曲线：一次训练换来多少条成本-质量点</td><td>5</td></tr><tr><td>35–45</td><td>陷阱与记账：τ、regret、评估器口径</td><td>6 / 7</td></tr></tbody></table>
-  <div class="ok"><b>课堂提问建议</b>：为什么 min 子网的损失一定高于 max？如果三明治里去掉 min，会坏在哪里？τ 很低时，还能用超网做搜索吗？</div>
+tests/test_supernet.py 40 个回归测试</pre>
+  <h3>课堂讨论：三个问题</h3>
+  <p>先让学生只看第 5、6 节的数据自己回答，再对照教师用文档：</p>
+  <div class="ok">
+    <p><b>① 最小子网的损失，一定会高于最大子网吗？</b>
+    看第 5 节的深度/宽度扫描与逐张预测，找出反例，再说清楚“为什么通常更差”究竟是从哪儿来的。</p>
+    <p><b>② 如果把三明治里的 min 那条腿去掉，会坏在哪里？</b>
+    先看第 4 节的覆盖直方图：哪些分支、哪些深度会被饿死？</p>
+    <p><b>③ 当 Kendall τ 只有 0.3 左右时，还能用超网做搜索吗？</b>
+    请给出一个可量化的判断标准，而不只是“能用/不能用”。</p>
+  </div>
+  <p style="color:var(--muted);font-size:12.5px">参考答案、45 分钟课堂节奏、常见误答见仓库里的
+  <code class="inline">docs/instructor_notes.md</code>（教师用，不随报告重新生成）。</p>
 </section>
 
 <section id="refs">
@@ -383,7 +407,7 @@ tests/test_supernet.py 33 个回归测试</pre>
 </section>
 
 <footer>
-  由 <code class="inline">examples/run_demo.py</code> 自动生成 · 2026-11-01 14:03:44 ·
+  由 <code class="inline">examples/run_demo.py</code> 自动生成 · 2026-11-01 14:10:46 ·
   图中标签使用英文，因为 matplotlib 默认字体没有中文字形。
 </footer>
 

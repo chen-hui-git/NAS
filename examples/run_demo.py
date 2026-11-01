@@ -411,6 +411,7 @@ def main(argv: list[str] | None = None) -> int:
             "true": preview_labels.tolist(),
             **predictions,
         },
+        "example_spec": intermediate.to_dict(),
     }
     metrics_path = out_dir / "metrics.json"
     metrics_path.write_text(json.dumps(metrics, indent=2, ensure_ascii=False), encoding="utf-8")
