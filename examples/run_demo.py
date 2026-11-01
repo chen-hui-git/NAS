@@ -20,7 +20,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import math
 import platform
 from pathlib import Path
 import random
@@ -32,21 +31,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import torch
 
+from supernet.evaluation import audit_ranking, evaluate_family, fine_tune_report
 from supernet import (
-    RankingExperimentConfig,
     SandwichConfig,
     SandwichTrainer,
     SearchSpace,
-    SubnetSpec,
-    average_subnet_loss,
-    fine_tune_subnet,
     make_task,
-    normalize_images,
     parameter_breakdown,
-    run_ranking_experiment,
-    subnet_accuracy,
 )
-from supernet.search_space import LayerChoice
 
 
 LOGGER = logging.getLogger("supernet")
@@ -154,24 +146,6 @@ def resolve_device(requested: str) -> str:
     if requested == "mps" and not torch.backends.mps.is_available():
         raise ValueError("mps requested but torch.backends.mps.is_available() is False")
     return requested
-
-
-def head_dim_for(space: SearchSpace, embed_dim: int) -> int:
-    candidates = [item for item in space.head_dims if embed_dim % item == 0]
-    if not candidates:
-        raise ValueError(f"no head_dim divides {embed_dim}")
-    return min(candidates)
-
-
-def quality_spec(space: SearchSpace, depth: int, embed_dim: int) -> SubnetSpec:
-    """固定"质量最高"的 block 选择，只让深度或宽度变化。"""
-    layer = LayerChoice(max(space.ffn_ratios), max(space.ffn_kernels), space.activations[0])
-    return SubnetSpec(
-        depth=depth,
-        embed_dim=embed_dim,
-        head_dim=head_dim_for(space, embed_dim),
-        layers=tuple(layer for _ in range(depth)),
-    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -329,140 +303,58 @@ def main(argv: list[str] | None = None) -> int:
     # --------------------------------------------------------- 评估子网族
     phase = time.monotonic()
     LOGGER.info("\n[5/7] 评估子网族（不再训练）")
-    batches = task.fixed_batches(args.batch_size, args.eval_batches, seed=args.seed + 101)
-    chance_loss = math.log(task.num_classes)
-    chance_accuracy = 1.0 / task.num_classes
-    max_loss = average_subnet_loss(trainer.model, max_spec, batches)
-    max_acc = subnet_accuracy(trainer.model, max_spec, batches)
-    min_loss = average_subnet_loss(trainer.model, min_spec, batches)
-    min_acc = subnet_accuracy(trainer.model, min_spec, batches)
-    LOGGER.info(f"      随机猜测基线        : loss {chance_loss:.3f} / acc {chance_accuracy:.3f}")
-    LOGGER.info(f"      max 子网            : loss {max_loss:.3f} / acc {max_acc:.3f}")
-    LOGGER.info(f"      min 子网            : loss {min_loss:.3f} / acc {min_acc:.3f}")
-
-    depth_sweep = []
-    for depth in range(space.min_depth, space.max_depth + 1):
-        spec = quality_spec(space, depth, space.max_embed_dim)
-        depth_sweep.append(
-            {
-                "depth": depth,
-                "arch_id": spec.arch_id,
-                "parameters": trainer.model.subnet_parameter_count(spec),
-                "loss": average_subnet_loss(trainer.model, spec, batches),
-                "accuracy": subnet_accuracy(trainer.model, spec, batches),
-            }
-        )
-    width_sweep = []
-    for embed_dim in space.embed_dims:
-        spec = quality_spec(space, space.max_depth, embed_dim)
-        width_sweep.append(
-            {
-                "embed_dim": embed_dim,
-                "arch_id": spec.arch_id,
-                "parameters": trainer.model.subnet_parameter_count(spec),
-                "loss": average_subnet_loss(trainer.model, spec, batches),
-                "accuracy": subnet_accuracy(trainer.model, spec, batches),
-            }
-        )
-    for row in depth_sweep:
+    report = evaluate_family(
+        trainer.model,
+        space,
+        task,
+        batch_size=args.batch_size,
+        eval_batches=args.eval_batches,
+        seed=args.seed + 101,
+    )
+    max_row, min_row = report.evals[0], report.evals[1]
+    example_spec = report.example_dict
+    LOGGER.info(f"      随机猜测基线        : loss {report.chance_loss:.3f} / acc {report.chance_accuracy:.3f}")
+    for row in report.evals:
+        LOGGER.info(f"      {row['label']:12s} 子网      : loss {row['loss']:.3f} / acc {row['accuracy']:.3f}")
+    for row in report.depth_sweep:
         LOGGER.info(f"      depth {row['depth']:2d}  {row['parameters'] / 1e6:5.2f}M  "
-            f"loss={row['loss']:.3f}  acc={row['accuracy']:.3f}")
-    for row in width_sweep:
+                    f"loss={row['loss']:.3f}  acc={row['accuracy']:.3f}")
+    for row in report.width_sweep:
         LOGGER.info(f"      width {row['embed_dim']:3d}  {row['parameters'] / 1e6:5.2f}M  "
-            f"loss={row['loss']:.3f}  acc={row['accuracy']:.3f}")
+                    f"loss={row['loss']:.3f}  acc={row['accuracy']:.3f}")
 
-    # 用固定 generator 而不是全局 random 模块：这一行和示例 spec 都必须只靠 --seed 就能复现。
-    intermediate = space.sample(random.Random(args.seed + 7))
-    example_spec = intermediate.to_dict()
-    eval_rows = [
-        {
-            "label": "max",
-            "arch_id": max_spec.arch_id,
-            "parameters": max_params,
-            "loss": max_loss,
-            "accuracy": max_acc,
-        },
-        {
-            "label": "min",
-            "arch_id": min_spec.arch_id,
-            "parameters": min_params,
-            "loss": min_loss,
-            "accuracy": min_acc,
-        },
-        {
-            "label": "random sample",
-            "arch_id": intermediate.arch_id,
-            "parameters": trainer.model.subnet_parameter_count(intermediate),
-            "loss": average_subnet_loss(trainer.model, intermediate, batches),
-            "accuracy": subnet_accuracy(trainer.model, intermediate, batches),
-        },
-    ]
+    LOGGER.info(f"\n      微调导出子网（各 {args.fine_tune_steps} 步，lr=3e-4）")
+    fine_tune_rows = fine_tune_report(
+        trainer.model, space, task, report,
+        steps=args.fine_tune_steps, batch_size=args.batch_size, seed=args.seed + 31,
+        log=LOGGER.info,
+    )
 
-    # ---- 导出子网微调：切片这个近似到底要付多少代价？
-    fine_tune_rows = []
-    if args.fine_tune_steps > 0:
-        LOGGER.info(f"\n      微调导出子网（各 {args.fine_tune_steps} 步，lr=3e-4）")
-        for row, spec in zip(eval_rows, (max_spec, min_spec, intermediate)):
-            tuned = fine_tune_subnet(
-                trainer.model,
-                spec,
-                task,
-                steps=args.fine_tune_steps,
-                batch_size=args.batch_size,
-                seed=args.seed + 31,
-            )
-            tuned_accuracy = subnet_accuracy(tuned, spec, batches)
-            gain = tuned_accuracy - row["accuracy"]
-            fine_tune_rows.append(
-                {
-                    "label": row["label"],
-                    "arch_id": row["arch_id"],
-                    "parameters": row["parameters"],
-                    "zero_shot": row["accuracy"],
-                    "fine_tuned": tuned_accuracy,
-                    "gain": gain,
-                }
-            )
-            LOGGER.info(f"      {row['label']:14s} zero-shot {row['accuracy'] * 100:5.2f}% -> "
-                f"fine-tuned {tuned_accuracy * 100:5.2f}%  ({gain * 100:+.2f} pt)")
-
-    preview_images, preview_labels = task.preview()
-    preview_inputs = normalize_images(preview_images).to(device)
-    predictions = {
-        "max": trainer.model.predict(preview_inputs, max_spec).tolist(),
-        "min": trainer.model.predict(preview_inputs, min_spec).tolist(),
-    }
     LOGGER.info("\n      预测示例（第一张是 max 子网，第二张是 min 子网）")
-    LOGGER.info(f"      真实    : {preview_labels.tolist()}")
-    LOGGER.info(f"      max     : {predictions['max']}")
-    LOGGER.info(f"      min     : {predictions['min']}")
+    LOGGER.info(f"      真实    : {report.predictions['true']}")
+    LOGGER.info(f"      max     : {report.predictions['max']}")
+    LOGGER.info(f"      min     : {report.predictions['min']}")
+    depth_sweep, width_sweep, eval_rows = report.depth_sweep, report.width_sweep, report.evals
     mark("eval", phase)
 
     # ------------------------------------------------------------- 排序审计
     phase = time.monotonic()
     LOGGER.info("\n[6/7] 超网内排序 vs 独立训练排序")
-    ranking_config = RankingExperimentConfig(
-        num_candidates=args.candidates,
+    ranking = audit_ranking(
+        trainer.model, space, task,
+        candidates=args.candidates,
         standalone_steps=args.standalone_steps,
         eval_batches=args.eval_batches,
         batch_size=args.batch_size,
         lr=args.lr,
         seed=args.seed,
-    )
-    deadline = started + args.budget - 20.0
-
-    def on_candidate(index: int, total: int, spec) -> None:
-        LOGGER.info(f"      独立训练候选 {index + 1}/{total}  "
-            f"depth={spec.depth} width={spec.embed_dim} id={spec.arch_id}")
-
-    ranking = run_ranking_experiment(
-        trainer.model, space, task, ranking_config,
-        progress=on_candidate, deadline=deadline, min_candidates=3,
+        deadline=started + args.budget - 20.0,
+        log=LOGGER.info,
     )
     LOGGER.info(f"      Kendall tau = {ranking['kendall_tau']:+.3f}   "
-        f"Spearman rho = {ranking['spearman_rho']:+.3f}   "
-        f"top1 一致 = {ranking['top1_agreement']}   "
-        f"regret = {ranking['regret']:+.3f}")
+                f"Spearman rho = {ranking['spearman_rho']:+.3f}   "
+                f"top1 一致 = {ranking['top1_agreement']}   "
+                f"regret = {ranking['regret']:+.3f}")
     mark("ranking", phase)
 
     # ---------------------------------------------------- 出图与报告
@@ -481,14 +373,15 @@ def main(argv: list[str] | None = None) -> int:
                 ffn_kernels=space.ffn_kernels,
             ),
             "sandwich": viz.plot_sandwich_curves(
-                history, figures_dir / "sandwich_curves.png", chance_loss
+                history, figures_dir / "sandwich_curves.png", report.chance_loss
             ),
             "coverage": viz.plot_coverage(trainer.stats, figures_dir / "coverage.png"),
             "family": viz.plot_family_curve(depth_sweep, width_sweep, figures_dir / "family.png"),
             "ranking": viz.plot_ranking_scatter(ranking, figures_dir / "ranking.png"),
             "predictions": viz.plot_predictions(
-                preview_images, preview_labels.tolist(),
-                {"max": predictions["max"], "min": predictions["min"]},
+                report.preview_images,
+                report.predictions["true"],
+                {"max": report.predictions["max"], "min": report.predictions["min"]},
                 figures_dir / "predictions.png",
             ),
         }
@@ -519,8 +412,8 @@ def main(argv: list[str] | None = None) -> int:
             "eval_batches": args.eval_batches,
             "standalone_steps": args.standalone_steps,
             "device": device,
-            "chance_loss": chance_loss,
-            "chance_accuracy": chance_accuracy,
+            "chance_loss": report.chance_loss,
+            "chance_accuracy": report.chance_accuracy,
             "space_size": space.architecture_count(),
             "dataset": task.describe(),
             "space": space.to_dict(),
@@ -540,10 +433,7 @@ def main(argv: list[str] | None = None) -> int:
         "depth_sweep": depth_sweep,
         "width_sweep": width_sweep,
         "ranking": ranking,
-        "predictions": {
-            "true": preview_labels.tolist(),
-            **predictions,
-        },
+        "predictions": report.predictions,
         "fine_tune": {
             "steps": args.fine_tune_steps,
             "lr": 3e-4,
@@ -593,7 +483,8 @@ def main(argv: list[str] | None = None) -> int:
     LOGGER.info(f"  总耗时              : {time.monotonic() - started:.0f}s   (明细: {timings})")
     LOGGER.info(f"  超网 / max / min     : {supernet_params / 1e6:.2f}M / "
         f"{max_params / 1e6:.2f}M / {min_params / 1e3:.0f}K 参数")
-    LOGGER.info(f"  准确率 猜测 / max / min: {chance_accuracy:.3f} / {max_acc:.3f} / {min_acc:.3f}")
+    LOGGER.info(f"  准确率 猜测 / max / min: {report.chance_accuracy:.3f} / "
+                f"{max_row['accuracy']:.3f} / {min_row['accuracy']:.3f}")
     LOGGER.info(f"  深度扫描            : " + "  ".join(
         f"d{row['depth']}={row['accuracy']:.3f}" for row in depth_sweep))
     LOGGER.info(f"  宽度扫描            : " + "  ".join(
