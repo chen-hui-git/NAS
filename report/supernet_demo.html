@@ -395,7 +395,13 @@ x = x + conv1d_k( LayerNorm(x) , out = dim x ratio )    ← kernel、ratio 来�
 <section id="budget">
   <h2>7 预算记账：把超网纳入实验口径<span class="tag">方法学</span></h2>
   <p>一旦换了评估器，不同策略的候选就不再是在同一把尺子下比较。下表是接入任何 NAS/HPO 对比时必须写清的量：</p>
-  <table><thead><tr><th>字段</th><th>取值</th><th>为什么必须记</th></tr></thead><tbody><tr><td>evaluator_kind</td><td>shared_weights</td><td>区分“独立训练后的精度”和“共享权重下的代理精度”</td></tr><tr><td>supernet_steps</td><td>1826</td><td>训练超网本身的开销</td></tr><tr><td>subnets_per_step</td><td>4</td><td>三明治一步算几个子网，决定口径</td></tr><tr><td>standalone_trials</td><td>10 × 250 steps</td><td>最终结论必须来自独立训练</td></tr><tr><td>eval_batches / batch_size</td><td>10 / 64</td><td>打分用的批次必须对所有策略一致</td></tr><tr><td>device / 墙钟</td><td>mps · 208s</td><td>训练成本和策略无关，但必须报告；本 Demo 走单机训练</td></tr><tr><td>seeds</td><td>1</td><td>至少 3 个种子才能谈方差，本 Demo 只跑 1 个</td></tr></tbody></table>
+  <p style="color:var(--muted);font-size:12.5px">其中 <code class="inline">ranking_audit</code> 那一行是本页最容易被忽略的开销：
+  超网侧打分只要一次前向，而“真值排序”要把每个候选**从零训练一遍**，成本随候选数线性增长。</p>
+  <table><thead><tr><th>字段</th><th>取值</th><th>为什么必须记</th></tr></thead><tbody><tr><td>evaluator_kind</td><td>shared_weights</td><td>区分“独立训练后的精度”和“共享权重下的代理精度”</td></tr><tr><td>supernet_steps</td><td>1826</td><td>训练超网本身的开销</td></tr><tr><td>subnets_per_step</td><td>4</td><td>三明治一步算几个子网，决定口径</td></tr><tr><td>standalone_trials</td><td>10 × 250 steps</td><td>最终结论必须来自独立训练</td></tr><tr><td>ranking_audit（真值排序）</td><td>10 × 250 步 × 64 = 160,000 图</td><td>超网训练量是 467,456 子网-图次；审计 = 它的 34%</td></tr><tr><td>audit / search 开销比</td><td>48s vs 151s 训练（32%），占本页总耗时 23%</td><td>审稿人第一个会算的数：审计开销常常和训练超网本身同量级</td></tr><tr><td>supernet_score（超网侧打分）</td><td>10 候选 × 10 batch（只前向）</td><td>几乎免费——贵的是“真值”那半，不是打分</td></tr><tr><td>eval_batches / batch_size</td><td>10 / 64</td><td>打分用的批次必须对所有策略一致</td></tr><tr><td>device / 墙钟</td><td>mps · 208s</td><td>训练成本和策略无关，但必须报告；本 Demo 走单机训练</td></tr><tr><td>seeds</td><td>1</td><td>至少 3 个种子才能谈方差，本 Demo 只跑 1 个</td></tr></tbody></table>
+  <p>成本是<b>极不对称</b>的：超网侧打分 = 一次前向 + 一批候选，几乎免费；真值侧 = 每个候选一次完整训练。
+  所以扩大审计规模（更多候选 / 更多种子）的代价是线性上涨的：把候选从 10 提到 30、
+  再跑 3 个种子，审计开销就会超过训练超网本身。这也是为什么很多 one-shot 论文只报最终架构精度、不报排序一致性——
+  不是不重要，是<b>很少给得起这个预算</b>。</p>
   <div class="note">原则：<b>超网内损失只能用于筛选，不能用于报告</b>。任何“我们的方法更好”的结论，最后的数字必须来自固定评估器下的独立训练。</div>
 </section>
 
@@ -480,7 +486,7 @@ tests/test_supernet.py 40 个回归测试</pre>
 </section>
 
 <footer>
-  由 <code class="inline">examples/run_demo.py</code> 自动生成 · 2026-11-01 14:24:09 ·
+  由 <code class="inline">examples/run_demo.py</code> 自动生成 · 2026-11-01 14:44:00 ·
   图中标签使用英文，因为 matplotlib 默认字体没有中文字形。
 </footer>
 

@@ -285,6 +285,22 @@ def build_report(context: dict, out_path: Path) -> Path:
         ],
     )
 
+    timings = run.get("timings", {}) or {}
+    audit_images = (
+        ranking["num_candidates"] * run["standalone_steps"] * run["batch_size"]
+    )
+    search_images = run["steps_done"] * (2 + run["n_random"]) * run["batch_size"]
+    audit_seconds = timings.get("ranking")
+    train_seconds = timings.get("train")
+    if audit_seconds and train_seconds:
+        audit_ratio = (
+            f"{audit_seconds:.0f}s vs {train_seconds:.0f}s 训练"
+            f"（{audit_seconds / train_seconds * 100:.0f}%），占本页总耗时 "
+            f"{audit_seconds / max(1e-9, run['wall_seconds']) * 100:.0f}%"
+        )
+    else:
+        audit_ratio = "未记录（metrics.json 无 timings）"
+
     by_supernet = [
         row["arch_id"]
         for row in sorted(ranking["candidates"], key=lambda item: item["supernet_loss"])
@@ -568,6 +584,8 @@ x = x + conv1d_k( LayerNorm(x) , out = dim x ratio )    ← kernel、ratio 来�
 <section id="budget">
   <h2>7 预算记账：把超网纳入实验口径<span class="tag">方法学</span></h2>
   <p>一旦换了评估器，不同策略的候选就不再是在同一把尺子下比较。下表是接入任何 NAS/HPO 对比时必须写清的量：</p>
+  <p style="color:var(--muted);font-size:12.5px">其中 <code class="inline">ranking_audit</code> 那一行是本页最容易被忽略的开销：
+  超网侧打分只要一次前向，而“真值排序”要把每个候选**从零训练一遍**，成本随候选数线性增长。</p>
   {_table(
       ["字段", "取值", "为什么必须记"],
       [
@@ -575,12 +593,24 @@ x = x + conv1d_k( LayerNorm(x) , out = dim x ratio )    ← kernel、ratio 来�
           ["supernet_steps", f"{run['steps_done']}", "训练超网本身的开销"],
           ["subnets_per_step", f"{1 + 1 + run['n_random']}", "三明治一步算几个子网，决定口径"],
           ["standalone_trials", f"{ranking['num_candidates']} × {run['standalone_steps']} steps", "最终结论必须来自独立训练"],
+          ["ranking_audit（真值排序）",
+           f"{ranking['num_candidates']} × {run['standalone_steps']} 步 × {run['batch_size']} = {audit_images:,} 图",
+           f"超网训练量是 {search_images:,} 子网-图次；审计 = 它的 {audit_images / max(1, search_images) * 100:.0f}%"],
+          ["audit / search 开销比", audit_ratio,
+           "审稿人第一个会算的数：审计开销常常和训练超网本身同量级"],
+          ["supernet_score（超网侧打分）",
+           f"{ranking['num_candidates']} 候选 × {run['eval_batches']} batch（只前向）",
+           "几乎免费——贵的是“真值”那半，不是打分"],
           ["eval_batches / batch_size", f"{run['eval_batches']} / {run['batch_size']}", "打分用的批次必须对所有策略一致"],
           ["device / 墙钟", f"{run['device']} · {run['wall_seconds']:.0f}s",
            "训练成本和策略无关，但必须报告；本 Demo 走单机训练"],
           ["seeds", "1", "至少 3 个种子才能谈方差，本 Demo 只跑 1 个"],
       ],
   )}
+  <p>成本是<b>极不对称</b>的：超网侧打分 = 一次前向 + 一批候选，几乎免费；真值侧 = 每个候选一次完整训练。
+  所以扩大审计规模（更多候选 / 更多种子）的代价是线性上涨的：把候选从 {ranking["num_candidates"]} 提到 30、
+  再跑 3 个种子，审计开销就会超过训练超网本身。这也是为什么很多 one-shot 论文只报最终架构精度、不报排序一致性——
+  不是不重要，是<b>很少给得起这个预算</b>。</p>
   <div class="note">原则：<b>超网内损失只能用于筛选，不能用于报告</b>。任何“我们的方法更好”的结论，最后的数字必须来自固定评估器下的独立训练。</div>
 </section>
 
