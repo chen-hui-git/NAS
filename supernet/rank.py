@@ -3,9 +3,9 @@
 This is the failure mode that makes one-shot NAS dangerous: shared weights are trained
 under co-adaptation, so their ordering of subnets can disagree with the ordering you get
 by training each subnet from scratch. The experiment below samples candidates, scores
-them inside the supernet, trains each of them independently with an identical budget,
-and reports Kendall tau / Spearman rho between the two rankings plus the regret of
-trusting the supernet's top-1.
+them inside the supernet, trains each of them independently with an identical budget, and
+reports Kendall tau / Spearman rho between the two rankings plus the regret of trusting
+the supernet's top-1.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from typing import Callable
 from torch import Tensor
 import torch
 
-from .losses import masked_next_token_loss
+from .losses import accuracy, classification_loss
 from .search_space import SearchSpace, SubnetSpec, point_space
 from .supernet import Supernet
 from .tasks import Batch, Task
@@ -26,10 +26,10 @@ from .tasks import Batch, Task
 
 @dataclass(frozen=True)
 class RankingExperimentConfig:
-    num_candidates: int = 8
-    standalone_steps: int = 120
+    num_candidates: int = 10
+    standalone_steps: int = 250
     eval_batches: int = 8
-    batch_size: int = 8
+    batch_size: int = 32
     lr: float = 3e-3
     grad_clip: float = 1.0
     seed: int = 0
@@ -48,19 +48,34 @@ def build_dense_subnet(space: SearchSpace, spec: SubnetSpec) -> Supernet:
 
 
 @torch.no_grad()
-def average_subnet_loss(
-    model: Supernet, spec: SubnetSpec, batches: list[Batch]
-) -> float:
+def average_subnet_loss(model: Supernet, spec: SubnetSpec, batches: list[Batch]) -> float:
     if not batches:
         raise ValueError("need at least one evaluation batch")
     was_training = model.training
     model.eval()
     total = 0.0
-    for tokens, targets, mask in batches:
-        total += float(masked_next_token_loss(model(tokens, spec), targets, mask))
+    for inputs, labels in batches:
+        total += float(classification_loss(model(inputs, spec), labels))
     if was_training:
         model.train()
     return total / len(batches)
+
+
+@torch.no_grad()
+def subnet_accuracy(model: Supernet, spec: SubnetSpec, batches: list[Batch]) -> float:
+    """Fraction of correctly classified samples over the given batches."""
+    if not batches:
+        raise ValueError("need at least one evaluation batch")
+    was_training = model.training
+    model.eval()
+    correct = 0
+    seen = 0
+    for inputs, labels in batches:
+        correct += int((model(inputs, spec).argmax(dim=1) == labels).sum())
+        seen += int(labels.numel())
+    if was_training:
+        model.train()
+    return correct / max(1, seen)
 
 
 def evaluate_specs(
@@ -80,14 +95,15 @@ def train_standalone(
 ) -> Supernet:
     """Train one subnet from scratch on an identical data stream and step budget."""
     torch.manual_seed(seed)
-    model = build_dense_subnet(space, spec)
+    device = getattr(task, "device", "cpu")
+    model = build_dense_subnet(space, spec).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr)
     batch_fn = task.batch_fn(config.batch_size, seed=seed + 1)
     model.train()
     for step in range(config.standalone_steps):
-        tokens, targets, mask = batch_fn(step)
+        inputs, labels = batch_fn(step)
         optimizer.zero_grad(set_to_none=True)
-        loss = masked_next_token_loss(model(tokens, spec), targets, mask)
+        loss = classification_loss(model(inputs, spec), labels)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), config.grad_clip)
         optimizer.step()
@@ -178,7 +194,11 @@ def run_ranking_experiment(
     )
 
     supernet_losses = evaluate_specs(supernet, candidates, batches)
+    supernet_accuracy = [
+        subnet_accuracy(supernet, spec, batches) for spec in candidates
+    ]
     standalone_losses: list[float] = []
+    standalone_accuracy: list[float] = []
     completed = 0
     for index, spec in enumerate(candidates):
         if progress is not None:
@@ -187,6 +207,7 @@ def run_ranking_experiment(
             space, spec, task, config, seed=config.seed * 1000 + index + 1
         )
         standalone_losses.append(average_subnet_loss(model, spec, batches))
+        standalone_accuracy.append(subnet_accuracy(model, spec, batches))
         completed += 1
         if (
             deadline is not None
@@ -197,6 +218,7 @@ def run_ranking_experiment(
 
     candidates = candidates[:completed]
     supernet_losses = supernet_losses[:completed]
+    supernet_accuracy = supernet_accuracy[:completed]
     supernet_ranks = _rank_positions(supernet_losses)
     standalone_ranks = _rank_positions(standalone_losses)
     supernet_top = min(range(completed), key=lambda i: supernet_losses[i])
@@ -211,6 +233,8 @@ def run_ranking_experiment(
                 "parameters": supernet.subnet_parameter_count(spec),
                 "supernet_loss": supernet_losses[index],
                 "standalone_loss": standalone_losses[index],
+                "supernet_accuracy": supernet_accuracy[index],
+                "standalone_accuracy": standalone_accuracy[index],
                 "supernet_rank": supernet_ranks[index],
                 "standalone_rank": standalone_ranks[index],
             }
@@ -226,5 +250,6 @@ def run_ranking_experiment(
         "regret": standalone_losses[supernet_top] - standalone_losses[standalone_top],
         "best_standalone_loss": standalone_losses[standalone_top],
         "best_supernet_loss": supernet_losses[supernet_top],
+        "best_standalone_accuracy": standalone_accuracy[standalone_top],
         "candidates": rows,
     }

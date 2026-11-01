@@ -6,9 +6,9 @@ Each step trains four subnets and sums their losses into one optimizer step:
     min     the cheapest subnet
     random  n_random uniformly sampled subnets
 
-Rationale (slimmable networks, refined by Once-for-All): the max subnet is the best
-performing one, the min subnet keeps the shared weights honest at the low end, and the
-random legs bring coverage; every subnet also acts as an in-place distillation target
+Rationale (slimmable networks, refined by Once-for-All): the max subnet is usually the
+best performing one, the min subnet keeps the shared weights honest at the low end, and
+the random legs bring coverage; every subnet also acts as an in-place distillation target
 for the others, because they all update the same weights.
 """
 
@@ -22,7 +22,7 @@ from typing import Callable
 from torch import Tensor
 import torch
 
-from .losses import masked_next_token_loss
+from .losses import accuracy, classification_loss
 from .search_space import SearchSpace, SubnetSpec
 from .supernet import Supernet
 
@@ -91,6 +91,7 @@ class StepRecord:
     total_loss: float
     grad_norm: float
     role_losses: dict[str, float]
+    role_accuracy: dict[str, float]
     role_arch_ids: dict[str, str]
 
     def to_dict(self) -> dict[str, object]:
@@ -99,6 +100,7 @@ class StepRecord:
             "total_loss": self.total_loss,
             "grad_norm": self.grad_norm,
             "role_losses": dict(self.role_losses),
+            "role_accuracy": dict(self.role_accuracy),
             "role_arch_ids": dict(self.role_arch_ids),
         }
 
@@ -141,20 +143,22 @@ class SandwichTrainer:
     # [/snippet:sandwich-build]
 
     # [snippet:sandwich-step]
-    def train_step(self, tokens: Tensor, targets: Tensor, mask: Tensor) -> StepRecord:
+    def train_step(self, inputs: Tensor, labels: Tensor) -> StepRecord:
         self.model.train()
         self.optimizer.zero_grad(set_to_none=True)
         role_losses: dict[str, float] = {}
+        role_accuracy: dict[str, float] = {}
         role_arch_ids: dict[str, str] = {}
         total = 0.0
         for role, spec, weight in self.build_sandwich():
-            loss = masked_next_token_loss(self.model(tokens, spec), targets, mask)
+            logits = self.model(inputs, spec)
+            loss = classification_loss(logits, labels)
             if weight > 0:
                 (loss * weight).backward()
-            value = float(loss.detach())
-            role_losses[role] = value
+            role_losses[role] = float(loss.detach())
+            role_accuracy[role] = accuracy(logits.detach(), labels)
             role_arch_ids[role] = spec.arch_id
-            total += weight * value
+            total += weight * float(loss.detach())
             self.stats.record(spec)
         grad_norm = torch.nn.utils.clip_grad_norm_(
             self.model.parameters(), self.config.grad_clip
@@ -162,26 +166,27 @@ class SandwichTrainer:
         self.optimizer.step()
         self.step_index += 1
         self.stats.steps = self.step_index
-        # [/snippet:sandwich-step]
         return StepRecord(
             step=self.step_index,
             total_loss=total,
             grad_norm=float(grad_norm),
             role_losses=role_losses,
+            role_accuracy=role_accuracy,
             role_arch_ids=role_arch_ids,
         )
+    # [/snippet:sandwich-step]
 
     def train(
         self,
-        batch_fn: Callable[[int], tuple[Tensor, Tensor, Tensor]],
+        batch_fn: Callable[[int], tuple[Tensor, Tensor]],
         steps: int,
         log_every: int = 0,
         on_log: Callable[[StepRecord], None] | None = None,
     ) -> list[StepRecord]:
         history: list[StepRecord] = []
         for step in range(steps):
-            tokens, targets, mask = batch_fn(step)
-            record = self.train_step(tokens, targets, mask)
+            inputs, labels = batch_fn(step)
+            record = self.train_step(inputs, labels)
             history.append(record)
             if on_log is not None and log_every > 0 and (
                 (step + 1) % log_every == 0 or step == 0

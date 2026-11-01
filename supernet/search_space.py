@@ -128,7 +128,8 @@ class SearchSpace:
     ffn_ratios: tuple[int, ...] = FFN_RATIOS
     ffn_kernels: tuple[int, ...] = FFN_KERNELS
     activations: tuple[str, ...] = ACTIVATIONS
-    vocab_size: int = 64
+    num_classes: int = 10
+    input_features: int = 28
     max_seq_len: int = 32
 
     def __post_init__(self) -> None:
@@ -148,8 +149,10 @@ class SearchSpace:
         ):
             if not values:
                 raise ValueError(f"{name} must not be empty")
-        if self.vocab_size < 2 or self.max_seq_len < 1:
-            raise ValueError("vocab_size and max_seq_len must be positive")
+        if self.num_classes < 2 or self.max_seq_len < 1:
+            raise ValueError("num_classes and max_seq_len must be positive")
+        if self.input_features < 1:
+            raise ValueError("input_features must be positive")
         for ratio in self.ffn_ratios:
             if ratio < 1:
                 raise ValueError("ffn_ratios must be positive")
@@ -239,7 +242,8 @@ class SearchSpace:
             "ffn_ratios": list(self.ffn_ratios),
             "ffn_kernels": list(self.ffn_kernels),
             "activations": list(self.activations),
-            "vocab_size": self.vocab_size,
+            "num_classes": self.num_classes,
+            "input_features": self.input_features,
             "max_seq_len": self.max_seq_len,
         }
 
@@ -261,7 +265,8 @@ def point_space(
         ffn_ratios=space.ffn_ratios,
         ffn_kernels=space.ffn_kernels,
         activations=space.activations,
-        vocab_size=space.vocab_size,
+        num_classes=space.num_classes,
+        input_features=space.input_features,
         max_seq_len=space.max_seq_len,
     )
     capacities = tuple(

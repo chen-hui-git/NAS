@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from .data import InductionTask, InductionTaskConfig, induction_batch
-from .dataset import CharLMTask, ensure_tiny_shakespeare
-from .losses import masked_next_token_loss
+from .dataset import MNISTTask, ensure_mnist
+from .losses import accuracy, classification_loss
 from .rank import (
     RankingExperimentConfig,
     average_subnet_loss,
@@ -13,6 +12,7 @@ from .rank import (
     kendall_tau,
     run_ranking_experiment,
     spearman_rho,
+    subnet_accuracy,
     train_standalone,
 )
 from .sandwich import SandwichConfig, SandwichStats, SandwichTrainer, StepRecord
@@ -29,7 +29,8 @@ from .search_space import (
     point_space,
 )
 from .supernet import Supernet, copy_subnet_weights
-from .tasks import Task, make_task
+from .synthetic import BarsTask
+from .tasks import MNIST_MEAN, MNIST_STD, Task, make_task, normalize_images
 
 __all__ = [
     "ACTIVATIONS",
@@ -37,11 +38,12 @@ __all__ = [
     "FFN_KERNELS",
     "FFN_RATIOS",
     "HEAD_DIMS",
-    "CharLMTask",
-    "InductionTask",
-    "InductionTaskConfig",
+    "BarsTask",
     "LayerCapacity",
     "LayerChoice",
+    "MNIST_MEAN",
+    "MNIST_STD",
+    "MNISTTask",
     "RankingExperimentConfig",
     "SandwichConfig",
     "SandwichStats",
@@ -51,17 +53,19 @@ __all__ = [
     "SubnetSpec",
     "Supernet",
     "Task",
+    "accuracy",
     "average_subnet_loss",
     "build_dense_subnet",
+    "classification_loss",
     "copy_subnet_weights",
-    "ensure_tiny_shakespeare",
+    "ensure_mnist",
     "evaluate_specs",
-    "induction_batch",
     "kendall_tau",
     "make_task",
-    "masked_next_token_loss",
+    "normalize_images",
     "point_space",
     "run_ranking_experiment",
     "spearman_rho",
+    "subnet_accuracy",
     "train_standalone",
 ]

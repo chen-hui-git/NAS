@@ -13,24 +13,27 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from supernet import (  # noqa: E402
-    CharLMTask,
-    InductionTask,
-    InductionTaskConfig,
+    BarsTask,
     LayerChoice,
+    MNISTTask,
     RankingExperimentConfig,
     SandwichConfig,
     SandwichTrainer,
     SearchSpace,
     SubnetSpec,
     Supernet,
+    accuracy,
     average_subnet_loss,
     build_dense_subnet,
-    induction_batch,
+    classification_loss,
     kendall_tau,
-    masked_next_token_loss,
+    make_task,
+    normalize_images,
     run_ranking_experiment,
     spearman_rho,
+    subnet_accuracy,
 )
+from supernet.dataset import DEFAULT_DATA_DIR, MNIST_FILES  # noqa: E402
 
 TEST_SPACE = SearchSpace(
     min_depth=2,
@@ -40,17 +43,24 @@ TEST_SPACE = SearchSpace(
     ffn_ratios=(2, 3),
     ffn_kernels=(1, 3),
     activations=("gelu", "silu"),
-    vocab_size=16,
-    max_seq_len=12,
+    num_classes=10,
+    input_features=8,
+    max_seq_len=6,
 )
 
-TEST_CONFIG = InductionTaskConfig(num_pairs=2, num_keys=6, num_values=4)
-TEST_TASK = InductionTask(TEST_CONFIG)
 
-
-def make_tokens(batch_size: int = 2) -> torch.Tensor:
+def make_inputs(batch_size: int = 2) -> torch.Tensor:
     generator = torch.Generator().manual_seed(0)
-    return torch.randint(0, 16, (batch_size, TEST_CONFIG.num_tokens), generator=generator)
+    return torch.randn(batch_size, TEST_SPACE.input_features, TEST_SPACE.max_seq_len,
+                       generator=generator)
+
+
+TEST_TASK = BarsTask(input_features=TEST_SPACE.input_features, seq_len=TEST_SPACE.max_seq_len)
+
+
+def make_labels(batch_size: int = 2) -> torch.Tensor:
+    generator = torch.Generator().manual_seed(1)
+    return torch.randint(0, TEST_SPACE.num_classes, (batch_size,), generator=generator)
 
 
 class SearchSpaceTests(unittest.TestCase):
@@ -115,19 +125,28 @@ class SearchSpaceTests(unittest.TestCase):
         left = [TEST_SPACE.sample(random.Random(3)).to_dict() for _ in range(5)]
         right = [TEST_SPACE.sample(random.Random(3)).to_dict() for _ in range(5)]
         self.assertEqual(left, right)
-        self.assertNotEqual(left, [TEST_SPACE.sample(random.Random(4)).to_dict() for _ in range(5)])
+        other = [TEST_SPACE.sample(random.Random(4)).to_dict() for _ in range(5)]
+        self.assertNotEqual(left, other)
+
+    def test_arch_id_ignores_derived_fields(self) -> None:
+        spec = TEST_SPACE.min_subnet()
+        payload = spec.to_dict()
+        self.assertEqual(SubnetSpec.from_dict(payload).arch_id, spec.arch_id)
 
 
 class SupernetForwardTests(unittest.TestCase):
     def test_extreme_subnets_produce_logits(self) -> None:
         model = Supernet(TEST_SPACE)
-        tokens = make_tokens()
+        inputs = make_inputs()
         for spec in (TEST_SPACE.max_subnet(), TEST_SPACE.min_subnet()):
-            logits = model(tokens, spec)
-            self.assertEqual(
-                logits.shape, (tokens.shape[0], TEST_SPACE.vocab_size, tokens.shape[1])
-            )
+            logits = model(inputs, spec)
+            self.assertEqual(logits.shape, (inputs.shape[0], TEST_SPACE.num_classes))
             self.assertTrue(torch.isfinite(logits).all())
+
+    def test_rejects_wrong_input_width(self) -> None:
+        model = Supernet(TEST_SPACE)
+        with self.assertRaises(ValueError):
+            model(torch.randn(2, TEST_SPACE.input_features + 1, 6), TEST_SPACE.min_subnet())
 
     def test_unused_branch_cannot_leak(self) -> None:
         torch.manual_seed(0)
@@ -138,12 +157,12 @@ class SupernetForwardTests(unittest.TestCase):
             head_dim=8,
             layers=(LayerChoice(2, 1, "gelu"), LayerChoice(2, 1, "silu")),
         )
-        tokens = make_tokens()
+        inputs = make_inputs()
         with torch.no_grad():
-            before = model(tokens, spec)
+            before = model(inputs, spec)
             model.layers[0].ffn.branches["r3k3"].conv1.weight.add_(1.0)
             model.layers[0].ffn.branches["r3k3"].conv2.bias.add_(1.0)
-            after = model(tokens, spec)
+            after = model(inputs, spec)
         self.assertTrue(torch.equal(before, after))
 
     def test_shallow_subnet_ignores_deeper_layers(self) -> None:
@@ -155,40 +174,18 @@ class SupernetForwardTests(unittest.TestCase):
             head_dim=8,
             layers=(LayerChoice(2, 1, "gelu"), LayerChoice(2, 1, "gelu")),
         )
-        tokens = make_tokens()
+        inputs = make_inputs()
         with torch.no_grad():
-            before = model(tokens, spec)
+            before = model(inputs, spec)
             model.layers[3].attn.qkv.weight.add_(1.0)
             model.layers[3].ffn.branches["r2k1"].conv1.weight.add_(1.0)
-            after = model(tokens, spec)
+            after = model(inputs, spec)
         self.assertTrue(torch.equal(before, after))
-
-    def test_logits_never_depend_on_future_tokens(self) -> None:
-        """Causality regression: a kernel>1 Conv1d must not read token t+1."""
-        torch.manual_seed(0)
-        model = Supernet(TEST_SPACE)
-        spec = TEST_SPACE.max_subnet()
-        self.assertGreater(max(spec_layer.ffn_kernel for spec_layer in spec.layers), 1)
-        tokens = make_tokens()
-        cut = 5
-        with torch.no_grad():
-            baseline = model(tokens, spec)
-            perturbed_tokens = tokens.clone()
-            perturbed_tokens[:, cut] = (perturbed_tokens[:, cut] + 1) % TEST_SPACE.vocab_size
-            perturbed = model(perturbed_tokens, spec)
-        self.assertTrue(
-            torch.allclose(baseline[:, :, :cut], perturbed[:, :, :cut], atol=1e-6),
-            msg="logits before the changed token must not move",
-        )
-        self.assertFalse(
-            torch.allclose(baseline[:, :, cut], perturbed[:, :, cut], atol=1e-6),
-            msg="the changed token must affect its own position",
-        )
 
     def test_export_subnet_matches_shared_forward(self) -> None:
         torch.manual_seed(1)
         model = Supernet(TEST_SPACE)
-        tokens = make_tokens()
+        inputs = make_inputs()
         specs = [TEST_SPACE.max_subnet(), TEST_SPACE.min_subnet()]
         specs.append(
             SubnetSpec(
@@ -205,8 +202,8 @@ class SupernetForwardTests(unittest.TestCase):
         for spec in specs:
             exported = model.export_subnet(spec)
             with torch.no_grad():
-                shared = model(tokens, spec)
-                separate = exported(tokens, spec)
+                shared = model(inputs, spec)
+                separate = exported(inputs, spec)
             self.assertTrue(
                 torch.allclose(shared, separate, atol=1e-6),
                 msg=f"export mismatch for {spec.arch_id}",
@@ -222,63 +219,41 @@ class SupernetForwardTests(unittest.TestCase):
     def test_dense_subnet_matches_point_space_forward(self) -> None:
         spec = TEST_SPACE.min_subnet()
         model = build_dense_subnet(TEST_SPACE, spec)
-        tokens = make_tokens()
-        logits = model(tokens, spec)
-        self.assertEqual(
-            logits.shape, (tokens.shape[0], TEST_SPACE.vocab_size, tokens.shape[1])
-        )
+        logits = model(make_inputs(), spec)
+        self.assertEqual(logits.shape, (2, TEST_SPACE.num_classes))
+
+    def test_predict_returns_label_indices(self) -> None:
+        model = Supernet(TEST_SPACE)
+        labels = model.predict(make_inputs(4), TEST_SPACE.min_subnet())
+        self.assertEqual(labels.shape, (4,))
+        self.assertTrue(bool(((labels >= 0) & (labels < TEST_SPACE.num_classes)).all()))
+        self.assertTrue(model.training, msg="predict must restore training mode")
 
 
 class LossTests(unittest.TestCase):
-    def test_masked_mean_matches_uniform_prediction(self) -> None:
-        logits = torch.zeros(2, 16, TEST_CONFIG.num_tokens)
-        tokens = make_tokens()
-        mask = torch.zeros_like(tokens, dtype=torch.bool)
-        mask[0, 1] = True
-        loss = masked_next_token_loss(logits, tokens, mask)
-        self.assertAlmostEqual(float(loss), math.log(16), places=5)
+    def test_uniform_logits_give_log_classes(self) -> None:
+        logits = torch.zeros(4, TEST_SPACE.num_classes)
+        labels = make_labels(4)
+        loss = classification_loss(logits, labels)
+        self.assertAlmostEqual(float(loss), math.log(TEST_SPACE.num_classes), places=5)
+        expected = float((labels == 0).to(torch.float32).mean())
+        self.assertAlmostEqual(accuracy(logits, labels), expected, places=5)
 
-    def test_unmasked_positions_do_not_change_the_loss(self) -> None:
-        logits = torch.zeros(2, 16, TEST_CONFIG.num_tokens)
-        tokens = make_tokens()
-        mask = torch.zeros_like(tokens, dtype=torch.bool)
-        mask[0, 2] = True
-        baseline = masked_next_token_loss(logits, tokens, mask)
-        perturbed = logits.clone()
-        perturbed[1] += 5.0
-        self.assertTrue(torch.allclose(baseline, masked_next_token_loss(perturbed, tokens, mask)))
+    def test_accurate_logits_score_better(self) -> None:
+        labels = make_labels(4)
+        good = torch.nn.functional.one_hot(labels, TEST_SPACE.num_classes).float() * 10.0
+        self.assertLess(float(classification_loss(good, labels)), 0.01)
+        self.assertEqual(accuracy(good, labels), 1.0)
 
-
-class InductionTaskTests(unittest.TestCase):
-    def test_scored_positions_predict_the_paired_value(self) -> None:
-        config = InductionTaskConfig(num_pairs=3, num_keys=8, num_values=4)
-        generator = torch.Generator().manual_seed(11)
-        tokens, targets, mask = induction_batch(config, 4, generator)
-        self.assertTrue(torch.equal(tokens, targets))
-        self.assertEqual(tokens.shape, (4, config.num_tokens))
-        pairs = config.num_pairs
-        for sample in range(4):
-            lookup = {}
-            for pair in range(pairs):
-                key = int(tokens[sample, 2 * pair])
-                value = int(tokens[sample, 2 * pair + 1])
-                lookup[key] = value
-            scored = mask[sample].nonzero().flatten().tolist()
-            self.assertEqual(len(scored), pairs)
-            for position in scored:
-                self.assertGreaterEqual(position, 2 * pairs)
-                key = int(tokens[sample, position])
-                self.assertEqual(int(tokens[sample, position + 1]), lookup[key])
-
-    def test_batches_are_reproducible_from_a_seed(self) -> None:
-        left = TEST_TASK.batch_fn(3, seed=5)
-        right = TEST_TASK.batch_fn(3, seed=5)
-        for step in range(3):
-            for a, b in zip(left(step), right(step)):
-                self.assertTrue(torch.equal(a, b))
+    def test_rejects_wrong_shapes(self) -> None:
+        with self.assertRaises(ValueError):
+            classification_loss(torch.zeros(3), torch.zeros(3, dtype=torch.long))
 
 
 class SandwichRuleTests(unittest.TestCase):
+    def _batch(self):
+        return make_inputs(4), make_labels(4)
+
     def test_sandwich_legs_contain_the_extremes(self) -> None:
         trainer = SandwichTrainer(TEST_SPACE, SandwichConfig(n_random=2, seed=0))
         legs = trainer.build_sandwich()
@@ -289,24 +264,23 @@ class SandwichRuleTests(unittest.TestCase):
         self.assertEqual(legs[0][1], TEST_SPACE.max_subnet())
         self.assertEqual(legs[1][1], TEST_SPACE.min_subnet())
 
-    def test_training_step_touches_max_min_and_random_branches(self) -> None:
+    def test_training_step_touches_max_min_and_random(self) -> None:
         trainer = SandwichTrainer(TEST_SPACE, SandwichConfig(n_random=2, seed=1))
         before = {
             name: parameter.detach().clone()
             for name, parameter in trainer.model.named_parameters()
         }
-        batch_fn = TEST_TASK.batch_fn(2, seed=0)
-        tokens, targets, mask = batch_fn(0)
-        record = trainer.train_step(tokens, targets, mask)
+        inputs, labels = self._batch()
+        record = trainer.train_step(inputs, labels)
         self.assertEqual(set(record.role_losses), {"max", "min", "random_0", "random_1"})
+        self.assertEqual(set(record.role_accuracy), {"max", "min", "random_0", "random_1"})
         self.assertGreater(record.grad_norm, 0.0)
-        # The deepest layer is only reachable through the max leg.
         deepest = f"layers.{TEST_SPACE.max_depth - 1}.attn.qkv.weight"
         self.assertFalse(torch.equal(before[deepest], trainer.model.state_dict()[deepest]))
 
     def test_coverage_reaches_every_depth_and_kernel(self) -> None:
         trainer = SandwichTrainer(TEST_SPACE, SandwichConfig(n_random=3, seed=2))
-        batch_fn = TEST_TASK.batch_fn(2, seed=0)
+        batch_fn = TEST_TASK.batch_fn(4, seed=0)
         trainer.train(batch_fn, steps=20)
         self.assertEqual(
             set(trainer.stats.depth_counts),
@@ -315,15 +289,21 @@ class SandwichRuleTests(unittest.TestCase):
         self.assertEqual(set(trainer.stats.kernel_counts), set(TEST_SPACE.ffn_kernels))
         self.assertEqual(trainer.stats.subnets_trained, 20 * 5)
 
-    def test_training_reduces_the_max_subnet_loss(self) -> None:
-        trainer = SandwichTrainer(
-            TEST_SPACE, SandwichConfig(n_random=1, seed=3, lr=5e-3, weight_decay=0.0)
+    def test_training_improves_the_max_subnet(self) -> None:
+        space = SearchSpace(
+            min_depth=2, max_depth=2, embed_dims=(16,), head_dims=(8,),
+            ffn_ratios=(2,), ffn_kernels=(1,), activations=("gelu",),
+            num_classes=10, input_features=8, max_seq_len=28,
         )
-        batch_fn = TEST_TASK.batch_fn(8, seed=4)
-        spec = TEST_SPACE.max_subnet()
-        batches = TEST_TASK.fixed_batches(8, 4, seed=9)
+        task = BarsTask(noise=0.1, input_features=8, seq_len=28)
+        trainer = SandwichTrainer(
+            space, SandwichConfig(n_random=1, seed=3, lr=5e-3, weight_decay=0.0)
+        )
+        spec = space.max_subnet()
+        batches = task.fixed_batches(16, 4, seed=9)
         before = average_subnet_loss(trainer.model, spec, batches)
-        trainer.train(batch_fn, steps=30)
+        batch_fn = task.batch_fn(16, seed=4)
+        trainer.train(batch_fn, steps=80)
         after = average_subnet_loss(trainer.model, spec, batches)
         self.assertLess(after, before)
 
@@ -346,21 +326,19 @@ class RankingMetricTests(unittest.TestCase):
     def test_ranking_experiment_reports_consistent_fields(self) -> None:
         torch.manual_seed(0)
         space = SearchSpace(
-            min_depth=2,
-            max_depth=3,
-            embed_dims=(16,),
-            head_dims=(8,),
-            ffn_ratios=(2,),
-            ffn_kernels=(1, 3),
-            activations=("gelu",),
-            vocab_size=16,
-            max_seq_len=12,
+            min_depth=2, max_depth=3, embed_dims=(16,), head_dims=(8,),
+            ffn_ratios=(2,), ffn_kernels=(1, 3), activations=("gelu",),
+            num_classes=10, input_features=8, max_seq_len=6,
         )
         model = Supernet(space)
         config = RankingExperimentConfig(
             num_candidates=3, standalone_steps=3, eval_batches=2, batch_size=2, seed=0
         )
-        result = run_ranking_experiment(model, space, TEST_TASK, config)
+        result = run_ranking_experiment(
+            model, space,
+            BarsTask(input_features=space.input_features, seq_len=space.max_seq_len),
+            config,
+        )
         self.assertEqual(result["num_candidates"], 3)
         self.assertEqual(len(result["candidates"]), 3)
         self.assertGreaterEqual(result["kendall_tau"], -1.0)
@@ -368,76 +346,75 @@ class RankingMetricTests(unittest.TestCase):
         self.assertGreaterEqual(result["regret"], 0.0)
         ranks = sorted(row["supernet_rank"] for row in result["candidates"])
         self.assertEqual(ranks, [1, 2, 3])
+        self.assertTrue(0.0 <= result["best_standalone_accuracy"] <= 1.0)
+
+    def test_subnet_accuracy_is_between_zero_and_one(self) -> None:
+        model = Supernet(TEST_SPACE)
+        batches = TEST_TASK.fixed_batches(4, 2, seed=1)
+        value = subnet_accuracy(model, TEST_SPACE.min_subnet(), batches)
+        self.assertGreaterEqual(value, 0.0)
+        self.assertLessEqual(value, 1.0)
 
 
-class CharLanguageTaskTests(unittest.TestCase):
-    """Uses the public corpus when it is present; never touches the network here."""
+class TaskTests(unittest.TestCase):
+    def test_normalize_images_turns_rows_into_tokens(self) -> None:
+        images = torch.zeros(3, 5, 7, dtype=torch.uint8)
+        inputs = normalize_images(images)
+        self.assertEqual(tuple(inputs.shape), (3, 7, 5))
+        self.assertFalse(torch.isnan(inputs).any())
 
-    @classmethod
-    def setUpClass(cls) -> None:
-        from pathlib import Path
+    def test_bars_task_shapes_and_class_range(self) -> None:
+        task = BarsTask()
+        inputs, labels = task.batch(6)
+        self.assertEqual(tuple(inputs.shape), (6, task.input_features, task.seq_len))
+        self.assertEqual(tuple(labels.shape), (6,))
+        self.assertTrue(bool(((labels >= 0) & (labels < task.num_classes)).all()))
 
-        corpus = Path(__file__).resolve().parents[1] / "data" / "tiny_shakespeare.txt"
-        if not corpus.exists():
-            raise unittest.SkipTest("tiny shakespeare corpus not cached locally")
-        cls.task = CharLMTask(seq_len=16, verbose=False)
-
-    def test_vocabulary_covers_the_corpus(self) -> None:
-        self.assertEqual(self.task.vocab_size, len(self.task.chars))
-        self.assertGreater(self.task.vocab_size, 40)
-
-    def test_mask_scores_every_position_but_the_last(self) -> None:
-        tokens, targets, mask = self.task.batch(3)
-        self.assertTrue(torch.equal(tokens, targets))
-        self.assertEqual(tokens.shape, (3, 16))
-        self.assertTrue(bool(mask[:, :-1].all()))
-        self.assertFalse(bool(mask[:, -1].any()))
-
-    def test_valid_batches_come_from_the_validation_split(self) -> None:
-        tokens, _, _ = self.task.fixed_batches(2, 1, seed=0)[0]
-        val = set(int(value) for value in self.task.val_ids[:200000].tolist())
-        train = set(int(value) for value in self.task.train_ids[:200000].tolist())
-        self.assertTrue(set(int(value) for value in tokens.flatten().tolist()) <= val)
-        self.assertNotEqual(val, train)
-
-    def test_batches_are_reproducible(self) -> None:
-        left = self.task.batch_fn(2, seed=7)
-        right = self.task.batch_fn(2, seed=7)
-        for step in range(2):
+    def test_bars_batches_are_reproducible(self) -> None:
+        task = BarsTask()
+        left = task.batch_fn(3, seed=5)
+        right = task.batch_fn(3, seed=5)
+        for step in range(3):
             for a, b in zip(left(step), right(step)):
                 self.assertTrue(torch.equal(a, b))
 
-
-class GenerationTests(unittest.TestCase):
-    def test_generate_extends_the_prompt(self) -> None:
-        torch.manual_seed(0)
-        model = Supernet(TEST_SPACE)
-        spec = TEST_SPACE.min_subnet()
-        prompt = make_tokens(1)[0]
-        out = model.generate(spec, prompt, max_new_tokens=5)
-        self.assertEqual(out.shape, (1, prompt.numel() + 5))
-        self.assertTrue(torch.equal(out[0, : prompt.numel()], prompt))
-
-    def test_generate_restores_training_mode(self) -> None:
-        model = Supernet(TEST_SPACE)
-        model.train()
-        model.generate(TEST_SPACE.min_subnet(), make_tokens(1)[0], max_new_tokens=2)
-        self.assertTrue(model.training)
-
-
-class TaskInterfaceTests(unittest.TestCase):
-    def test_induction_task_exposes_shapes(self) -> None:
-        self.assertEqual(TEST_TASK.vocab_size, TEST_CONFIG.vocab_size)
-        self.assertEqual(TEST_TASK.seq_len, TEST_CONFIG.num_tokens)
-        tokens, _, mask = TEST_TASK.batch(2)
-        self.assertEqual(tokens.shape, (2, TEST_CONFIG.num_tokens))
-        self.assertEqual(mask.dtype, torch.bool)
+    def test_bars_preview_covers_every_class(self) -> None:
+        task = BarsTask()
+        images, labels = task.preview()
+        self.assertEqual(sorted(labels.tolist()), list(range(task.num_classes)))
+        self.assertEqual(tuple(images.shape), (task.num_classes, task.seq_len, task.input_features))
+        self.assertEqual(images.dtype, torch.uint8)
 
     def test_unknown_task_name_is_rejected(self) -> None:
-        from supernet import make_task
-
         with self.assertRaises(ValueError):
-            make_task("mnist-tokens")
+            make_task("cifar-100")
+
+
+class MNISTTaskTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cached = all((DEFAULT_DATA_DIR / name).exists() for name in MNIST_FILES)
+        if not cached:
+            raise unittest.SkipTest("MNIST is not cached locally; run the demo once first")
+        cls.task = MNISTTask(verbose=False, train_limit=2000)
+
+    def test_shapes_and_class_count(self) -> None:
+        self.assertEqual(self.task.num_classes, 10)
+        self.assertEqual(self.task.seq_len, 28)
+        self.assertEqual(self.task.input_features, 28)
+        inputs, labels = self.task.batch(4)
+        self.assertEqual(tuple(inputs.shape), (4, 28, 28))
+        self.assertTrue(bool(((labels >= 0) & (labels < 10)).all()))
+
+    def test_held_out_batches_differ_from_training_batches(self) -> None:
+        train_inputs, _ = self.task.batch(4)
+        val_inputs, _ = self.task.fixed_batches(4, 1, seed=0)[0]
+        self.assertFalse(torch.allclose(train_inputs, val_inputs))
+
+    def test_preview_returns_one_image_per_class(self) -> None:
+        images, labels = self.task.preview()
+        self.assertEqual(labels.tolist(), list(range(10)))
+        self.assertEqual(tuple(images.shape), (10, 28, 28))
 
 
 class ReportTests(unittest.TestCase):
@@ -449,6 +426,18 @@ class ReportTests(unittest.TestCase):
         self.assertIn("F.conv1d", code)
         self.assertNotIn("snippet:", code)
         self.assertIn("self.weight[:out_channels, :in_channels]", code)
+
+    def test_all_report_snippets_resolve(self) -> None:
+        from supernet.report import read_snippet
+
+        for relative_path, name in (
+            ("supernet/modules.py", "elastic-conv"),
+            ("supernet/modules.py", "elastic-ffn"),
+            ("supernet/supernet.py", "supernet-forward"),
+            ("supernet/sandwich.py", "sandwich-build"),
+            ("supernet/sandwich.py", "sandwich-step"),
+        ):
+            self.assertTrue(read_snippet(relative_path, name).strip())
 
     def test_highlight_marks_tokens_and_escapes_html(self) -> None:
         from supernet.report import highlight

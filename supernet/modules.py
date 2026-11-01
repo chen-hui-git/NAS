@@ -6,10 +6,6 @@ standard one-shot NAS approximation (OFA): one shared tensor serves every subnet
 the whole family trains with a single optimizer state. Slicing changes which weights
 are used but never mixes two branches, so an unused branch cannot leak into the
 output of a subnet.
-
-Every sequence convolution is padded on the LEFT only, so logits at position t never
-depend on token t+1 or later. Without that, the elastic FFN kernels (3 and 5) would
-read the future residual stream and the language-modelling loss would be meaningless.
 """
 
 from __future__ import annotations
@@ -50,12 +46,7 @@ class ElasticConv1d(nn.Module):
         self.max_in_channels = max_in_channels
         self.max_out_channels = max_out_channels
         self.kernel_size = kernel_size
-        # Causal padding: pad the LEFT only. Symmetric padding would let a kernel>1
-        # convolution read the residual stream of token t+1, which carries that token's
-        # own embedding -- the model would then "predict" the next token by copying it
-        # and validation loss collapses to ~0. That leak is easy to miss, so it is
-        # covered by test_logits_never_depend_on_future_tokens.
-        self.left_pad = kernel_size - 1
+        self.padding = kernel_size // 2
         self.weight = nn.Parameter(
             torch.empty(max_out_channels, max_in_channels, kernel_size)
         )
@@ -85,9 +76,7 @@ class ElasticConv1d(nn.Module):
             )
         weight = self.weight[:out_channels, :in_channels]
         bias = None if self.bias is None else self.bias[:out_channels]
-        if self.left_pad:
-            x = F.pad(x, (self.left_pad, 0))
-        return F.conv1d(x, weight, bias)
+        return F.conv1d(x, weight, bias, padding=self.padding)
     # [/snippet:elastic-conv]
 
 
@@ -114,7 +103,7 @@ class ElasticLayerNorm(nn.Module):
 
 
 class ElasticAttention(nn.Module):
-    """Multi-head self-attention with elastic width and elastic head dimension."""
+    """Multi-head self-attention over the token sequence, elastic width and head size."""
 
     def __init__(self, max_dim: int) -> None:
         super().__init__()
@@ -135,7 +124,7 @@ class ElasticAttention(nn.Module):
         q = q.reshape(shape).transpose(2, 3)
         k = k.reshape(shape).transpose(2, 3)
         v = v.reshape(shape).transpose(2, 3)
-        context = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+        context = F.scaled_dot_product_attention(q, k, v)
         context = context.transpose(2, 3).reshape(batch, dim, seq)
         return self.proj(context, dim, dim)
 

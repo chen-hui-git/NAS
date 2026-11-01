@@ -10,12 +10,13 @@ from .search_space import LayerCapacity, SearchSpace, SubnetSpec, point_space
 
 
 class Supernet(nn.Module):
-    """Maximum-width, maximum-depth Transformer in which every subnet is a slice.
+    """Maximum-width, maximum-depth digit classifier in which every subnet is a slice.
 
-    Depth is elastic by truncation: a subnet of depth L runs layers 0..L-1. Width,
-    head size and the per-block FFN choice are elastic by leading-channel slicing.
-    All of it is one parameter set, so 4..10 layers x 3 widths x 6 FFN branches share
-    a single optimizer state.
+    The input is a (batch, input_features, seq_len) tensor: for MNIST each of the 28
+    image rows is one token whose features are the 28 pixel values of that row. Depth is
+    elastic by truncation: a subnet of depth L runs layers 0..L-1. Width, head size and
+    the per-block FFN choice are elastic by leading-channel slicing. All of it is one
+    parameter set, so 4..10 layers x 3 widths x 6 FFN branches share one optimizer state.
     """
 
     def __init__(
@@ -35,7 +36,7 @@ class Supernet(nn.Module):
                 f"got {len(capacities)} layer capacities for depth {space.max_depth}"
             )
         max_dim = space.max_embed_dim
-        self.tok_emb = nn.Embedding(space.vocab_size, max_dim)
+        self.input_proj = ElasticConv1d(space.input_features, max_dim, 1)
         self.pos = nn.Parameter(torch.zeros(1, max_dim, space.max_seq_len))
         self.layers = nn.ModuleList(
             [
@@ -44,21 +45,24 @@ class Supernet(nn.Module):
             ]
         )
         self.norm = ElasticLayerNorm(max_dim)
-        self.head = ElasticConv1d(max_dim, space.vocab_size, 1)
-        nn.init.normal_(self.tok_emb.weight, std=0.02)
-        nn.init.normal_(self.pos, std=0.02)
+        self.head = ElasticConv1d(max_dim, space.num_classes, 1)
 
     # [snippet:supernet-forward]
-    def forward(self, tokens: Tensor, spec: SubnetSpec) -> Tensor:
-        """Run one subnet over a token batch; returns logits (batch, vocab, seq)."""
+    def forward(self, inputs: Tensor, spec: SubnetSpec) -> Tensor:
+        """Run one subnet over a batch; returns class logits (batch, num_classes)."""
         spec.validate(self.space)
-        if tokens.dim() != 2:
-            raise ValueError("tokens must be (batch, seq)")
-        seq = tokens.shape[1]
+        if inputs.dim() != 3:
+            raise ValueError("inputs must be (batch, input_features, seq_len)")
+        features, seq = inputs.shape[1], inputs.shape[2]
+        if features != self.space.input_features:
+            raise ValueError(
+                f"input has {features} features but the space expects "
+                f"{self.space.input_features}"
+            )
         if seq > self.space.max_seq_len:
             raise ValueError(f"seq {seq} exceeds max_seq_len {self.space.max_seq_len}")
         dim = spec.embed_dim
-        x = self.tok_emb(tokens).transpose(1, 2)[:, :dim] + self.pos[:, :dim, :seq]
+        x = self.input_proj(inputs, dim, features) + self.pos[:, :dim, :seq]
         for index in range(spec.depth):
             layer = spec.layers[index]
             x = self.layers[index](
@@ -70,15 +74,27 @@ class Supernet(nn.Module):
                 layer.activation,
             )
         x = self.norm(x, dim)
-        return self.head(x, self.space.vocab_size, dim)
+        pooled = x.mean(dim=-1, keepdim=True)
+        return self.head(pooled, self.space.num_classes, dim).squeeze(-1)
     # [/snippet:supernet-forward]
+
+    @torch.no_grad()
+    def predict(self, inputs: Tensor, spec: SubnetSpec) -> Tensor:
+        """Predicted class indices for a batch."""
+        was_training = self.training
+        self.eval()
+        labels = self(inputs, spec).argmax(dim=1)
+        if was_training:
+            self.train()
+        return labels
 
     def subnet_parameter_count(self, spec: SubnetSpec) -> int:
         """Analytic parameter count of one subnet, excluding unused branches."""
         spec.validate(self.space)
         dim = spec.embed_dim
-        vocab = self.space.vocab_size
-        total = vocab * dim + dim * self.space.max_seq_len
+        classes = self.space.num_classes
+        total = self.space.input_features * dim + dim
+        total += dim * self.space.max_seq_len
         for layer in spec.layers:
             hidden = dim * layer.ffn_ratio
             total += 2 * dim
@@ -88,39 +104,8 @@ class Supernet(nn.Module):
             total += hidden * dim * layer.ffn_kernel + hidden
             total += dim * hidden + dim
         total += 2 * dim
-        total += vocab * dim + vocab
+        total += classes * dim + classes
         return total
-
-    @torch.no_grad()
-    def generate(
-        self,
-        spec: SubnetSpec,
-        prompt: Tensor,
-        max_new_tokens: int,
-        temperature: float = 1.0,
-        generator: torch.Generator | None = None,
-    ) -> Tensor:
-        """Greedy/temperature sampling from one subnet; used for teaching samples."""
-        spec.validate(self.space)
-        if max_new_tokens < 0:
-            raise ValueError("max_new_tokens must be non-negative")
-        if prompt.dim() == 1:
-            prompt = prompt.reshape(1, -1)
-        if prompt.dim() != 2 or prompt.shape[0] != 1:
-            raise ValueError("generate expects a single prompt sequence")
-        was_training = self.training
-        self.eval()
-        ids = prompt
-        for _ in range(max_new_tokens):
-            window = ids[:, -self.space.max_seq_len :]
-            logits = self(window, spec)[:, :, -1] / max(temperature, 1e-6)
-            next_id = torch.multinomial(
-                logits.softmax(dim=-1), 1, generator=generator
-            )
-            ids = torch.cat([ids, next_id], dim=1)
-        if was_training:
-            self.train()
-        return ids
 
     @torch.no_grad()
     def export_subnet(self, spec: SubnetSpec) -> "Supernet":
@@ -136,7 +121,7 @@ class Supernet(nn.Module):
 def copy_subnet_weights(target: Supernet, source: Supernet, spec: SubnetSpec) -> None:
     """Slice the shared weights of source into the narrower target."""
     dim = spec.embed_dim
-    target.tok_emb.weight.copy_(source.tok_emb.weight[:, :dim])
+    _copy_conv(target.input_proj, source.input_proj, dim, source.space.input_features)
     target.pos.copy_(source.pos[:, :dim, :])
     for index in range(spec.depth):
         layer = spec.layers[index]
@@ -153,10 +138,12 @@ def copy_subnet_weights(target: Supernet, source: Supernet, spec: SubnetSpec) ->
         _copy_conv(dst_branch.conv1, src_branch.conv1, hidden, dim)
         _copy_conv(dst_branch.conv2, src_branch.conv2, dim, hidden)
     _copy_norm(target.norm, source.norm, dim)
-    _copy_conv(target.head, source.head, source.space.vocab_size, dim)
+    _copy_conv(target.head, source.head, source.space.num_classes, dim)
 
 
-def _copy_conv(target: ElasticConv1d, source: ElasticConv1d, out_channels: int, in_channels: int) -> None:
+def _copy_conv(
+    target: ElasticConv1d, source: ElasticConv1d, out_channels: int, in_channels: int
+) -> None:
     target.weight.copy_(source.weight[:out_channels, :in_channels])
     if target.bias is not None and source.bias is not None:
         target.bias.copy_(source.bias[:out_channels])

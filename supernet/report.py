@@ -210,6 +210,9 @@ def build_report(context: dict, out_path: Path) -> Path:
     ranking = context["ranking"]
     figures = context["figures"]
 
+    max_row = next(row for row in context["evals"] if row["label"] == "max")
+    min_row = next(row for row in context["evals"] if row["label"] == "min")
+
     cards = "".join(
         [
             _card("超网参数", _millions(params["supernet"]), "一份权重，全部子网共享"),
@@ -217,6 +220,8 @@ def build_report(context: dict, out_path: Path) -> Path:
             _card("最小子网", _millions(params["min"]), "depth 4 / width 64"),
             _card("权重共享比", f"{params['shared_ratio']:.0f}x", "超网 / 最大子网 参数量"),
             _card("本次训练步数", f"{run['steps_done']}", f"{run['step_ms']:.0f} ms/步 · 每步 4 个子网"),
+            _card("max 子网准确率", f'{max_row["accuracy"] * 100:.1f}%',
+                  f'min 子网 {min_row["accuracy"] * 100:.1f}% / 随机猜 {run["chance_accuracy"] * 100:.0f}%'),
             _card("排序一致性 τ", _fmt(ranking["kendall_tau"], 2), "超网内排序 vs 独立训练排序"),
         ]
     )
@@ -227,6 +232,7 @@ def build_report(context: dict, out_path: Path) -> Path:
             f'<code class="inline">{html.escape(row["arch_id"])}</code>',
             _millions(row["parameters"]),
             _fmt(row["loss"]),
+            f'{row["accuracy"] * 100:.1f}%',
         ]
         for row in context["evals"]
     ]
@@ -236,6 +242,7 @@ def build_report(context: dict, out_path: Path) -> Path:
             str(row["depth"]),
             _millions(row["parameters"]),
             _fmt(row["loss"]),
+            f'{row["accuracy"] * 100:.1f}%',
         ]
         for row in context["depth_sweep"]
     ]
@@ -250,25 +257,32 @@ def build_report(context: dict, out_path: Path) -> Path:
                 str(row["spec"]["depth"]),
                 str(row["spec"]["embed_dim"]),
                 _millions(row["parameters"]),
-                _fmt(row["supernet_loss"]),
-                _fmt(row["standalone_loss"]),
-                str(row["supernet_rank"]),
-                str(row["standalone_rank"]),
+                f'{_fmt(row["supernet_loss"])} / {row["supernet_accuracy"] * 100:.1f}%',
+                f'{_fmt(row["standalone_loss"])} / {row["standalone_accuracy"] * 100:.1f}%',
+                f'{row["supernet_rank"]} vs {row["standalone_rank"]}',
             ]
         )
         candidate_classes.append("bad" if disagree else "")
 
-    if context["samples"]:
-        sample_blocks = "".join(
-            f'<h3>{html.escape(sample["label"])} · '
-            f'<code class="inline">{html.escape(sample["arch_id"])}</code></h3>'
-            f'<pre class="ascii">{html.escape(sample["text"])}</pre>'
-            for sample in context["samples"]
-        )
-    else:
-        sample_blocks = (
-            '<p class="note">本次使用合成任务（没有字符词表），跳过文本采样。</p>'
-        )
+    predictions = context["predictions"]
+    truth = predictions["true"]
+    correct_max = sum(1 for a, b in zip(truth, predictions["max"]) if a == b)
+    correct_min = sum(1 for a, b in zip(truth, predictions["min"]) if a == b)
+    prediction_block = _figure(
+        figures,
+        "predictions",
+        "每个类别取一张测试图，下面两行是同一份共享权重里 max 与 min 子网的预测"
+        "（绿色正确、橙色错误）。",
+    ) + _table(
+        ["", "逐张预测"],
+        [
+            ["真实标签", " ".join(str(value) for value in truth)],
+            [f"max 子网（{correct_max}/{len(truth)} 正确）",
+             " ".join(str(value) for value in predictions["max"])],
+            [f"min 子网（{correct_min}/{len(truth)} 正确）",
+             " ".join(str(value) for value in predictions["min"])],
+        ],
+    )
 
     depth_counts = ", ".join(f"{key}: {value}" for key, value in stats["depth_counts"].items())
     kernel_counts = ", ".join(f"{key}: {value}" for key, value in stats["kernel_counts"].items())
@@ -305,9 +319,9 @@ def build_report(context: dict, out_path: Path) -> Path:
   <p class="lead">最小可运行的权重共享 NAS 教学实验，训练规则用的是三明治采样（sandwich rule）。本页所有数字与图都来自这一次真实运行。</p>
   <div class="meta">
     <span class="pill">数据集 {html.escape(dataset["name"])}</span>
-    <span class="pill">seq_len {dataset["seq_len"]}</span>
-    <span class="pill">vocab {dataset["vocab_size"]}</span>
-    <span class="pill">batch {run["batch_size"]}</span>
+    <span class="pill">输入 {dataset["input_features"]}×{dataset["seq_len"]}</span>
+    <span class="pill">类别 {dataset["num_classes"]}</span>
+    <span class="pill">device {run["device"]} · batch {run["batch_size"]}</span>
     <span class="pill">lr {run["lr"]}</span>
     <span class="pill">总耗时 {run["wall_seconds"]:.0f}s</span>
     <span class="pill">生成于 {html.escape(run["started_at"])}</span>
@@ -328,7 +342,13 @@ def build_report(context: dict, out_path: Path) -> Path:
 ...  N 次训练                       └──────────────────────────────────────┘
                                      子网 = 切片 → 一次训练，N 个子网可评估</pre>
 
-  <h3>本仓库这次实际覆盖了多大的空间？</h3>
+  <h3>这次的任务</h3>
+  <p>MNIST 手写数字分类：一张 28×28 的图被看成 <b>{dataset["seq_len"]} 个 token</b>
+  （每行一个 token，每行的 {dataset["input_features"]} 个像素值就是它的特征），
+  过完超网后做平均池化，再输出 {dataset["num_classes"]} 类 logits。选它就是因为“准确率”比“困惑度”好讲：
+  随机猜是 {run["chance_accuracy"] * 100:.0f}%。</p>
+
+  <h3>本仓库这次覆盖了多大的空间？</h3>
   <p>空间里有 <b>{run["space_size"]:,}</b> 个不同的候选架构（深度 4–10 × 宽度 × 每层 FFN 分支 × 激活），
   但训练只发生在<b>一份 {_millions(params["supernet"])} 参数的权重</b>上。这就是权重共享省下来的东西。</p>
 
@@ -347,7 +367,8 @@ def build_report(context: dict, out_path: Path) -> Path:
           ["ffn_ratio", " / ".join(str(item) for item in space["ffn_ratios"]), "分支：每层 9 个 (ratio, kernel) 组合，选一支"],
           ["ffn_kernel", " / ".join(str(item) for item in space["ffn_kernels"]), "分支：卷积核大小不能切片，只能并列存放"],
           ["activation", " / ".join(space["activations"]), "运行时切换：无参数"],
-          ["vocab / seq", f"{dataset['vocab_size']} / {dataset['seq_len']}", "固定：所有子网共享同一 token 词表"],
+          ["输入 / 类别", f"{dataset['input_features']}×{dataset['seq_len']} / {dataset['num_classes']}",
+           "固定：每行像素是一个 token，所有子网共享同一输入输出形状"],
       ],
   )}
   <p>一个具体的子网长这样（本次运行里随机抽到的一个）：</p>
@@ -361,12 +382,11 @@ def build_report(context: dict, out_path: Path) -> Path:
   <p>切片只发生在 <code class="inline">forward</code> 里几行：权重按最大宽度分配，子网取前 <code class="inline">out_channels × in_channels</code> 那块。同一份参数因此同时服务宽子网和窄子网。</p>
   {_figure(figures, "slicing", "左：一个共享卷积核矩阵，窄子网只用左上角的块；右：每层并列的 FFN 分支，子网只激活一支。")}
   {_code("supernet/modules.py", "elastic-conv")}
-  <div class="warn"><b>因果性（我们踩过的坑）</b>：序列上的 Conv1d 必须<b>只在左侧 padding</b>。
-  对称 padding 会让 kernel 3 / 5 的 FFN 读到位置 t+1 的残差流——那里正好带着下一个 token 自己的 embedding，
-  模型于是“照抄”答案，验证损失会掉到 0.002 这种不可能的值。
-  <code class="inline">tests/test_supernet.py</code> 里的
-  <code class="inline">test_logits_never_depend_on_future_tokens</code> 就是为这个坑写的回归测试：
-  改动第 t 个 token，只能影响位置 ≥ t 的 logits。</div>
+  <div class="warn"><b>如果拿这个骨架去做语言模型：注意因果性。</b>
+  本任务是分类，注意力不遮挡、Conv1d 用对称 padding 都没问题；但同一份代码挪去做自回归语言模型时，
+  序列 Conv1d 必须<b>只在左侧 padding</b>。否则 kernel 3 / 5 的 FFN 会读到位置 t+1 的残差流
+  （那里正好带着下一个 token 自己的 embedding），模型于是“照抄”答案，验证损失会掉到 0.002 这种不可能的值。
+  我们第一版就是这个 bug。</div>
   <p>FFN 的分支选择同样只是一个字典查找：</p>
   {_code("supernet/modules.py", "elastic-ffn")}
   <p>整网前向就变成“截断深度 + 一路切片”：</p>
@@ -405,13 +425,15 @@ def build_report(context: dict, out_path: Path) -> Path:
   <p>训练结束后，同一份权重里可以取出任意多的子网并立刻打分。下面是<b>没有额外训练</b>的两次扫描：固定最大宽度扫深度 4→10，固定最大深度扫宽度。</p>
   {_figure(figures, "family", "左：深度扫描；右：参数-质量散点，两条曲线都来自同一份共享权重。")}
   <h3>深度扫描明细</h3>
-  {_table(["depth", "参数量", "验证损失"], depth_rows)}
+  {_table(["depth", "参数量", "验证损失", "验证准确率"], depth_rows)}
   <h3>极端子网与随机子网</h3>
-  {_table(["子网", "arch_id", "参数量", "验证损失"], eval_rows)}
-  <p>均匀猜测（log vocab = {_fmt(run["uniform_loss"], 3)}）是这次任务的起点；三者之间的距离就是“训练确实发生了”的证据。</p>
-  <h3>定性检查：直接从子网采样文本</h3>
-  <p>下面两段是用同一个超网里的两个不同子网生成的（温度 0.8，提示词相同）。这只是<b>{run["steps_done"]} 步</b>的小实验，文本仍然很粗糙；重点是可以从<b>同一套权重</b>里取出不同成本的子网并直接推理。</p>
-  {sample_blocks}
+  {_table(["子网", "arch_id", "参数量", "验证损失", "验证准确率"], eval_rows)}
+  <p>随机猜的基线是 loss {_fmt(run["chance_loss"], 3)} / 准确率 {run["chance_accuracy"] * 100:.0f}%；
+  上面几个数字与它的距离，就是“训练确实发生了”的证据。</p>
+  <h3>定性检查：同一份权重里的两个子网分别预测</h3>
+  <p>max 与 min 子网共用同一套参数，参数量却差了约 {params["max"] / max(1, params["min"]):.0f} 倍。
+  下面看它们在同一批测试图上的逐张表现。</p>
+  {prediction_block}
 </section>
 
 <section id="trap">
@@ -423,6 +445,7 @@ def build_report(context: dict, out_path: Path) -> Path:
       ["指标", "本次实测"],
       [
           ["Kendall τ", _fmt(ranking["kendall_tau"], 2)],
+          ["独立训练后的最高准确率", f'{ranking["best_standalone_accuracy"] * 100:.1f}%'],
           ["Spearman ρ", _fmt(ranking["spearman_rho"], 2)],
           ["top-1 是否一致", "是" if ranking["top1_agreement"] else "否"],
           ["regret（信任超网 top-1 的代价）", f'{ranking["regret"]:+.3f}'],
@@ -432,7 +455,8 @@ def build_report(context: dict, out_path: Path) -> Path:
   )}
   <p>逐候选对照（橙色行 = 两套排序对不上）：</p>
   {_table(
-      ["arch_id", "depth", "width", "参数量", "超网内损失", "独立训练损失", "超网排名", "真实排名"],
+      ["arch_id", "depth", "width", "参数量", "超网内 loss / acc", "独立训练 loss / acc",
+       "排名 超网 vs 真实"],
       candidate_rows,
       candidate_classes,
   )}
@@ -457,7 +481,8 @@ def build_report(context: dict, out_path: Path) -> Path:
           ["subnets_per_step", f"{1 + 1 + run['n_random']}", "三明治一步算几个子网，决定口径"],
           ["standalone_trials", f"{ranking['num_candidates']} × {run['standalone_steps']} steps", "最终结论必须来自独立训练"],
           ["eval_batches / batch_size", f"{run['eval_batches']} / {run['batch_size']}", "打分用的批次必须对所有策略一致"],
-          ["GPU / 墙钟", f"{run['wall_seconds']:.0f}s on CPU", "训练成本和策略无关，但必须报告"],
+          ["device / 墙钟", f"{run['device']} · {run['wall_seconds']:.0f}s",
+           "训练成本和策略无关，但必须报告；本 Demo 走单机训练"],
           ["seeds", "1", "至少 3 个种子才能谈方差，本 Demo 只跑 1 个"],
       ],
   )}
@@ -478,7 +503,8 @@ def build_report(context: dict, out_path: Path) -> Path:
   sandwich.py       三明治训练循环 + 覆盖统计
   rank.py           超网内打分 vs 独立训练，Kendall/Spearman
   tasks.py          任务接口（batch / fixed_batches / batch_fn）
-  dataset.py        tiny-shakespeare（SHA-256 校验，可离线 --dataset induction）
+  dataset.py        MNIST（gzip+IDX 结构校验 + SHA-256，可离线 --dataset bars）
+  synthetic.py      合成条形图任务（无网络时的回退）
   viz.py            教学图（matplotlib，headless）
   report.py         本页的 HTML 生成器
 examples/run_demo.py  端到端演示（带时间预算）
@@ -509,7 +535,8 @@ tests/test_supernet.py 33 个回归测试</pre>
     <li>Yu et al. <i>BigNAS: Scaling Up Neural Architecture Search with Big Single-Stage Models</i>. <a href="https://arxiv.org/abs/2003.11142">arXiv:2003.11142</a></li>
     <li>Wang et al. <i>AttentiveNAS: Improving Neural Architecture Search via Attentive Sampling</i>. <a href="https://arxiv.org/abs/2011.09011">arXiv:2011.09011</a></li>
   </ul>
-  <p style="color:var(--muted);font-size:12.5px">数据集：Tiny Shakespeare（公版莎士比亚文本，char-rnn 分发），本地缓存并做 SHA-256 校验。</p>
+  <p style="color:var(--muted);font-size:12.5px">数据集：MNIST 手写数字（LeCun, Bottou, Bengio, Haffner 1998；idx3/idx1 ubyte 原始格式），
+  本地缓存，做 gzip + IDX 结构校验与 SHA-256 校验。</p>
 </section>
 
 <footer>

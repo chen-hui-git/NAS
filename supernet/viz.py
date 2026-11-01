@@ -139,40 +139,97 @@ def plot_slicing_schematic(path: Path) -> Path:
     return _save(fig, path)
 
 
-def plot_sandwich_losses(history: list, path: Path, uniform_loss: float | None = None) -> Path:
-    """Loss of each sandwich leg over training: max is low, min is high, random sits between."""
-    _style()
+def _leg_series(history: list, key: str) -> tuple[list[float], list[float], list[float], list[float]]:
+    """Extract (steps, max, min, random-mean) series from step records."""
     steps = [record.step for record in history]
-    max_losses = [record.role_losses.get("max", float("nan")) for record in history]
-    min_losses = [record.role_losses.get("min", float("nan")) for record in history]
-    random_losses = []
+    max_values = []
+    min_values = []
+    random_values = []
     for record in history:
-        values = [
-            loss for role, loss in record.role_losses.items() if role.startswith("random")
-        ]
-        random_losses.append(sum(values) / len(values) if values else float("nan"))
+        table = getattr(record, key)
+        max_values.append(table.get("max", float("nan")))
+        min_values.append(table.get("min", float("nan")))
+        values = [value for role, value in table.items() if role.startswith("random")]
+        random_values.append(sum(values) / len(values) if values else float("nan"))
+    return steps, max_values, min_values, random_values
 
-    fig, axis = plt.subplots(figsize=(7.4, 4.2))
-    for values, color, label in (
-        (max_losses, MAX_COLOR, "max subnet"),
-        (min_losses, MIN_COLOR, "min subnet"),
-        (random_losses, RANDOM_COLOR, "random subnets (mean)"),
+
+def plot_sandwich_curves(
+    history: list, path: Path, chance_loss: float | None = None
+) -> Path:
+    """Training loss and accuracy of each sandwich leg, step by step."""
+    _style()
+    fig, (left, right) = plt.subplots(1, 2, figsize=(10.4, 4.2))
+
+    steps, max_losses, min_losses, random_losses = _leg_series(history, "role_losses")
+    _, max_acc, min_acc, random_acc = _leg_series(history, "role_accuracy")
+
+    for axis, series, target, ylabel in (
+        (left, (max_losses, min_losses, random_losses), chance_loss, "training cross-entropy"),
+        (right, (max_acc, min_acc, random_acc), None, "training accuracy"),
     ):
-        axis.plot(steps, values, color=color, alpha=0.28, linewidth=0.9)
-        axis.plot(steps, _smooth(values), color=color, linewidth=1.9, label=label)
-    if uniform_loss is not None:
-        axis.axhline(uniform_loss, color=MUTED, linestyle=":", linewidth=1.2)
-        axis.annotate(
-            "uniform guess (log vocab)",
-            xy=(steps[0], uniform_loss),
-            xytext=(steps[0], uniform_loss + 0.12),
+        for values, color, label in zip(
+            series,
+            (MAX_COLOR, MIN_COLOR, RANDOM_COLOR),
+            ("max subnet", "min subnet", "random subnets (mean)"),
+        ):
+            axis.plot(steps, values, color=color, alpha=0.25, linewidth=0.8)
+            axis.plot(steps, _smooth(values), color=color, linewidth=1.9, label=label)
+        axis.set_xlabel("sandwich step (4 subnets per step)")
+        axis.set_ylabel(ylabel)
+        axis.legend(loc="best")
+    if chance_loss is not None:
+        left.axhline(chance_loss, color=MUTED, linestyle=":", linewidth=1.2)
+        left.annotate(
+            "random guessing",
+            xy=(steps[0], chance_loss),
+            xytext=(steps[0], chance_loss + 0.08),
             fontsize=8,
             color=MUTED,
         )
-    axis.set_xlabel("sandwich step (4 subnets per step)")
-    axis.set_ylabel("masked cross-entropy")
-    axis.set_title("Every step trains max + min + 2 random subnets in one optimizer step")
-    axis.legend(loc="upper right")
+    left.set_title("Loss of each leg (thin = raw, thick = smoothed)")
+    right.set_title("Accuracy of each leg")
+    fig.tight_layout()
+    return _save(fig, path)
+
+
+def plot_predictions(
+    images,
+    true_labels,
+    predictions: dict,
+    path: Path,
+) -> Path:
+    """One test image per class, with true and predicted labels for two subnets."""
+    _style()
+    import numpy as np
+
+    count = len(true_labels)
+    fig, axes = plt.subplots(1, count, figsize=(1.05 * count + 0.8, 2.9))
+    if count == 1:
+        axes = [axes]
+    rows = list(predictions.items())
+    for index, axis in enumerate(axes):
+        axis.imshow(np.asarray(images[index]), cmap="gray")
+        axis.set_xticks([])
+        axis.set_yticks([])
+        axis.grid(False)
+        for spine in axis.spines.values():
+            spine.set_visible(False)
+        axis.set_title(f"true {int(true_labels[index])}", fontsize=8.5, color=INK)
+        for offset, (label, guesses) in enumerate(rows):
+            guess = int(guesses[index])
+            color = RANDOM_COLOR if guess == int(true_labels[index]) else MAX_COLOR
+            axis.text(
+                0.5,
+                -0.10 - 0.16 * offset,
+                f"{label}: {guess}",
+                transform=axis.transAxes,
+                ha="center",
+                va="top",
+                fontsize=8,
+                color=color,
+            )
+    fig.suptitle("Same shared weights, two very different subnets", fontsize=10, fontweight="bold")
     fig.tight_layout()
     return _save(fig, path)
 
