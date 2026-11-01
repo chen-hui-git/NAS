@@ -208,6 +208,14 @@ def plot_sandwich_curves(
 ) -> Path:
     """Training loss and accuracy of each sandwich leg, step by step."""
     _style()
+    if not history:
+        # Nothing was trained (e.g. the deadline expired immediately). Draw a note
+        # instead of crashing on an empty series.
+        fig, axis = plt.subplots(figsize=(7.4, 2.6))
+        axis.axis("off")
+        axis.text(0.5, 0.5, "no training steps were run", ha="center", va="center",
+                  fontsize=11, color=MUTED)
+        return _save(fig, path)
     fig, (left, right) = plt.subplots(1, 2, figsize=(10.4, 4.2))
 
     stage_of = [getattr(record, "stage", 0) for record in history]

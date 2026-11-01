@@ -655,7 +655,10 @@ x = x + conv1d_k( LayerNorm(x) , out = dim x ratio )    ← kernel、ratio 来�
           ["eval_batches / batch_size", f"{run['eval_batches']} / {run['batch_size']}", "打分用的批次必须对所有策略一致"],
           ["device / 墙钟", f"{run['device']} · {run['wall_seconds']:.0f}s",
            "训练成本和策略无关，但必须报告；本 Demo 走单机训练"],
-          ["seeds", "1", "至少 3 个种子才能谈方差，本 Demo 只跑 1 个"],
+          ["seed", str(run.get("seed", "?")), "所有随机源都由它派生（见第 8 节）；本次只跑 1 个种子"],
+          ["git_commit / 环境",
+           f'{run.get("git_commit", "?")} · torch {run.get("torch_version", "?")} · py {run.get("python_version", "?")}',
+           "换 commit 或换 torch 版本，结论就不保证一致"],
       ],
   )}
   <p>成本是<b>极不对称</b>的：超网侧打分 = 一次前向 + 一批候选，几乎免费；真值侧 = 每个候选一次完整训练。
@@ -697,6 +700,34 @@ tests/test_supernet.py 35 个回归测试</pre>
   </div>
   <p style="color:var(--muted);font-size:12.5px">参考答案、45 分钟课堂节奏、常见误答见仓库里的
   <code class="inline">docs/instructor_notes.md</code>（教师用，不随报告重新生成）。</p>
+
+  <h3>如何严格复现这份报告</h3>
+  {_table(
+      ["随机源", "派生方式", "影响范围"],
+      [
+          ["超网初始化 + 三明治采样", "torch.manual_seed(seed) / random.Random(seed)",
+           "权重初值、每步抽到的随机子网"],
+          ["训练数据流", f"task.batch_fn(..., seed={run.get('seed', '?')})", "每一步的 batch"],
+          ["评测批次", f"task.fixed_batches(..., seed={run.get('seed', '?')} + 101)",
+           "所有子网共用的测试图"],
+          ["示例子网（第 2 节）", "random.Random(seed + 7)", "示例 spec 与第 3 节示意图"],
+          ["排序实验的候选", "random.Random(seed)", "参与审计的候选子网"],
+          ["每个候选的独立训练", "torch.manual_seed(seed x 1000 + 序号 + 1)", "真值排序"],
+      ],
+  )}
+  <p>复现精度分三档，报告里的数字属于哪一档要说清楚：</p>
+  <ul>
+    <li><b>逐位一致</b>：同 commit + 同 torch/设备 + <b>固定 <code class="inline">--steps</code></b> + 同 seed。
+    此时权重、数据流、候选、独立训练、覆盖统计都应完全相同（本项目用“同命令连跑两次、逐字段比对”验证过）。</li>
+    <li><b>同量级、不同值</b>：用 <code class="inline">--budget</code> 让脚本自己算步数。
+    步数 = 剩余时间 / 实测单步耗时，本次是 {run["steps_done"]} 步——换台机器或机器更忙，步数就变，精度跟着变。</li>
+    <li><b>不可比</b>：换设备（cpu 与 mps 之间）或换 torch 版本，浮点累加顺序不同，小数点后几位必然不同。</li>
+  </ul>
+  <div class="note">所以“这份报告能不能复现”的正确回答是：
+  <b>在同一环境、固定 <code class="inline">--steps</code>、同 seed 下可逐位复现；只给 <code class="inline">--budget</code> 时只能复现量级。</b>
+  本次记录：seed = {run.get("seed", "?")}，commit = {run.get("git_commit", "?")}，
+  torch {run.get("torch_version", "?")}，device {run["device"]}，确定性算子 =
+  {"开" if run.get("deterministic") else "关"}。</div>
 
   <h3>读完应该能回答</h3>
   <ol>
@@ -742,7 +773,12 @@ tests/test_supernet.py 35 个回归测试</pre>
   {_table(
       ["配置", "训练步数", "max 子网", "min 子网", "随机子网", "宽度 w64 / w96", "Kendall τ"],
       [
-          ["完整三明治（本页那次）", "1826", "98.1%", "96.9%", "93.0%", "95.8% / 92.8%", "+0.33"],
+          ["完整三明治（本页那次）", str(run["steps_done"]),
+           f'{max_row["accuracy"] * 100:.1f}%', f'{min_row["accuracy"] * 100:.1f}%',
+           f'{next(row for row in context["evals"] if row["label"] == "random sample")["accuracy"] * 100:.1f}%',
+           f'{next(row for row in context["width_sweep"] if row["embed_dim"] == 64)["accuracy"] * 100:.1f}% / '
+           f'{next(row for row in context["width_sweep"] if row["embed_dim"] == 96)["accuracy"] * 100:.1f}%',
+           f'{ranking["kendall_tau"]:+.2f}'],
           ["只留 max + min（<code class=\"inline\">--n-random 0</code>）", "600", "92.5%", "95.2%",
            "<b>20.8%</b>", "<b>48.8% / 44.7%</b>", "+0.20"],
           ["训练量砍到 200 步（<code class=\"inline\">--steps 200</code>）", "200", "84.8%", "77.7%",

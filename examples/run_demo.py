@@ -22,7 +22,10 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import platform
 from pathlib import Path
+import random
+import subprocess
 import sys
 import time
 
@@ -63,6 +66,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=None,
                         help="default 64 on mps, 8 on cpu: measured, not guessed")
     parser.add_argument("--lr", type=float, default=3e-3)
+    parser.add_argument("--deterministic", action="store_true",
+                        help="ask torch for deterministic kernels (cpu: usually fine, mps: may refuse)")
     parser.add_argument("--shrink-stages", type=int, default=0,
                         help="progressive shrinking stages; 0 = off (joint training), 4 = OFA style")
     parser.add_argument("--distill-weight", type=float, default=0.0,
@@ -84,6 +89,23 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--no-report", action="store_true")
     parser.add_argument("--open", action="store_true", help="open the HTML report when finished")
     return parser.parse_args(argv)
+
+
+def git_state() -> str:
+    """Short HEAD hash (+dirty when the worktree differs), so a report ties to real code."""
+    root = Path(__file__).resolve().parents[1]
+    try:
+        commit = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=root, stderr=subprocess.DEVNULL, text=True,
+        ).strip()
+        dirty = subprocess.check_output(
+            ["git", "status", "--porcelain"],
+            cwd=root, stderr=subprocess.DEVNULL, text=True,
+        ).strip()
+        return commit + ("+dirty" if dirty else "")
+    except Exception:
+        return "unknown"
 
 
 def resolve_device(requested: str) -> str:
@@ -138,6 +160,13 @@ def main(argv: list[str] | None = None) -> int:
         return elapsed
 
     device = resolve_device(args.device)
+    deterministic = False
+    if args.deterministic:
+        try:
+            torch.use_deterministic_algorithms(True)
+            deterministic = True
+        except Exception as error:  # backend refused: keep going, but record it
+            print(f"  warning: deterministic algorithms unavailable ({error})")
     batch_size = args.batch_size if args.batch_size is not None else (
         64 if device == "mps" else 8
     )
@@ -253,7 +282,7 @@ def main(argv: list[str] | None = None) -> int:
         steps=max(0, planned - warmup_steps - timed_steps),
         log_every=log_every,
         on_log=on_log,
-        deadline=started + args.budget - args.report_reserve,
+        deadline=started + max(args.budget - args.report_reserve, args.budget * 0.6),
     )
     train_seconds = mark("train", phase)
     say(f"      训练完成            : {planned} 步 / "
@@ -304,7 +333,9 @@ def main(argv: list[str] | None = None) -> int:
         say(f"      width {row['embed_dim']:3d}  {row['parameters'] / 1e6:5.2f}M  "
             f"loss={row['loss']:.3f}  acc={row['accuracy']:.3f}")
 
-    intermediate = space.sample()
+    # A fixed generator instead of the global random module: this row and the example
+    # spec must be reproducible from --seed alone.
+    intermediate = space.sample(random.Random(args.seed + 7))
     example_spec = intermediate.to_dict()
     eval_rows = [
         {
@@ -403,6 +434,12 @@ def main(argv: list[str] | None = None) -> int:
             "started_at": started_at,
             "wall_seconds": round(time.monotonic() - started, 1),
             "timings": timings,
+            "seed": args.seed,
+            "deterministic": deterministic,
+            "torch_version": torch.__version__,
+            "python_version": platform.python_version(),
+            "platform": platform.platform(),
+            "git_commit": git_state(),
             "budget_seconds": args.budget,
             "steps_planned": planned,
             "steps_done": trainer.step_index,
