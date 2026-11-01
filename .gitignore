@@ -4,6 +4,7 @@ __pycache__/
 data/
 report/figures/
 report/sandwich_log.jsonl
+report/run.log
 .mplcache/
 .idea/
 .tools/

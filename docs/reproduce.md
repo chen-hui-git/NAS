@@ -70,7 +70,23 @@ shasum -a 256 report/supernet.pt
 > 如果是 7000 万级别，说明 LFS 没生效。
 > GitHub 的 LFS 免费额度是 1 GB 存储 / 1 GB 月流量，70 MB 的单文件没问题，但别往里塞多个。
 
-## 四、复现后怎么自查
+## 四、一次运行会留下哪些日志
+
+| 文件 | 内容 | 是否入库 |
+| --- | --- | --- |
+| `<out>/run.log` | **带时间戳的完整控制台日志**（每个阶段、进度条、逐候选审计） | 否（gitignore） |
+| `<out>/sandwich_log.jsonl` | **逐步结构化记录**：每步 4 条腿的 loss / acc / arch_id / stage | 否（gitignore） |
+| `<out>/metrics.json` | 汇总指标 + 环境（`git_commit` / `torch` / `python` / `platform` / `seed`）+ `timings` | 是 |
+| `<out>/figures/*.png` | 报告用图 | 否（已内嵌进 HTML） |
+| `<out>/supernet.pt` | 超网权重 | **是（Git LFS）** |
+
+`run.log` 与 `sandwich_log.jsonl` 都在 `--out` 下，默认路径是 `report/`。
+想要别的位置：`--out /tmp/run1`；想换日志文件名：`--log-file my.log`；想只留逐步 jsonl：`--log-file ""`。
+
+控制台只打消息本体（保持分栏对齐），文件里每行额外带 `时间戳 + 级别`，方便事后按时间定位慢在哪一段
+（与 `metrics.json` 的 `timings` 对照）。
+
+## 五、复现后怎么自查
 
 ```bash
 ../.venv/bin/python - <<'PY'
@@ -88,7 +104,7 @@ PY
 - **数值级**：`steps_done` 与 `evals[0].accuracy` 对齐到 ±1pt 即可；
 - **结论级**：只要 `steps_done` 在千步量级，报告第 5/6 节的结论方向就会复现。
 
-## 五、已知的不确定源与边界
+## 六、已知的不确定源与边界
 
 | 项 | 影响 | 说明 |
 | --- | --- | --- |

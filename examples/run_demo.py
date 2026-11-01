@@ -52,16 +52,24 @@ from supernet.search_space import LayerChoice
 LOGGER = logging.getLogger("supernet")
 
 
-def configure_logging(level: str) -> None:
+def configure_logging(level: str, log_file: Path | None = None) -> None:
     """把运行进度交给 logging 输出。
 
-    格式化串保持命令行原有的分栏排版；日志级别仍是常规过滤器，
-    所以 --log-level WARNING 会静默进度行，DEBUG 则留给库内部诊断。
+    控制台保持原有的分栏排版（只有消息本身），同时另开一个文件 handler 记录带时间戳的
+    完整日志；日志级别仍是常规过滤器，--log-level WARNING 会静默进度行。
     """
+    handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
+    if log_file is not None:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.FileHandler(log_file, mode="w", encoding="utf-8")
+        file_handler.setFormatter(
+            logging.Formatter("%(asctime)s %(levelname)-7s %(message)s")
+        )
+        handlers.append(file_handler)
     logging.basicConfig(
         level=getattr(logging, level.upper(), logging.INFO),
         format="%(message)s",
-        stream=sys.stdout,
+        handlers=handlers,
         force=True,
     )
 
@@ -113,6 +121,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--log-level", default="INFO",
                         choices=("DEBUG", "INFO", "WARNING", "ERROR"),
                         help="logging verbosity for the run's progress output")
+    parser.add_argument("--log-file", default="run.log",
+                        help="file name inside --out that receives the timestamped log "
+                             "(empty string disables it)")
     parser.add_argument("--open", action="store_true", help="open the HTML report when finished")
     return parser.parse_args(argv)
 
@@ -175,12 +186,16 @@ def quality_spec(space: SearchSpace, depth: int, embed_dim: int) -> SubnetSpec:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    configure_logging(args.log_level)
+    logging_ready = False
     started = time.monotonic()
     started_at = time.strftime("%Y-%m-%d %H:%M:%S")
     out_dir = Path(args.out)
     figures_dir = out_dir / "figures"
     out_dir.mkdir(parents=True, exist_ok=True)
+    if not logging_ready:
+        log_file = out_dir / args.log_file if args.log_file else None
+        configure_logging(args.log_level, log_file)
+        logging_ready = True
     timings: dict[str, float] = {}
 
     def mark(name: str, since: float) -> float:
