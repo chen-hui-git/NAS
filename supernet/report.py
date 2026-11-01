@@ -500,6 +500,22 @@ x = x + conv1d_k( LayerNorm(x) , out = dim x ratio )    ← kernel、ratio 来�
   {_code("supernet/sandwich.py", "sandwich-step")}
   {_figure(figures, "sandwich", "三条腿的损失曲线：max 最低、min 最高、随机子网位于中间。细线是原始值，粗线是滑动平均。")}
 
+  <h3>两个可选开关：渐进收缩与子网蒸馏（默认关）</h3>
+  {_table(
+      ["开关", "怎么开", "做什么"],
+      [
+          ["渐进收缩 PS", "<code class=\"inline\">--shrink-stages 4</code>",
+           "从最大配置开始训练，分 4 段逐级解锁更小的深度 / 宽度 / 卷积核；"
+           "每段内的 min 腿是“当前前沿”而不是全局最小"],
+          ["子网蒸馏 KD", "<code class=\"inline\">--distill-weight 0.5</code>",
+           "用 max 腿的 logits 当教师，其余腿的损失变成 (1-λ)·CE + λ·KL(student, teacher)"],
+      ],
+  )}
+  <p>为什么默认关闭：两者都和预算强耦合。渐进收缩的<b>前段每步更贵</b>——实测四条腿全是最大子网时
+  128.5 ms/步，而混合腿是 73.4 ms/步；固定预算下这会把步数压掉三到四成。
+  蒸馏几乎不加计算，但它把小容量子网往大子网的输出分布上拉，<b>教师自己训得不够好时是负收益</b>。
+  三组同预算的实测对照见仓库里的 <code class="inline">docs/comparison.md</code>。</p>
+
   <h3>这条规则的出处，以及它和 OFA 是什么关系</h3>
   <p><b>不是“改进版 OFA”，反而是 OFA 用了这条规则。</b>按时间线：</p>
   {_table(
@@ -522,10 +538,12 @@ x = x + conv1d_k( LayerNorm(x) , out = dim x ratio )    ← kernel、ratio 来�
   {_table(
       ["OFA / BigNAS 有", "本 Demo", "后果"],
       [
-          ["渐进收缩（先训大子网，再逐步解锁小的）", "没有，所有尺寸同时从头训练",
-           "中间与小尺寸早期欠训，本次 min 子网 96.9% 低于 max 的 98.1%"],
-          ["子网之间做知识蒸馏（KL 对齐 teacher logits）", "没有，只是四条腿的交叉熵求和",
-           "腿之间只靠共享权重隐式互相影响，没有显式教师信号"],
+          ["渐进收缩（先训大子网，再逐步解锁小的）",
+           "可选开启（<code class=\"inline\">--shrink-stages 4</code>），默认关",
+           "默认的联合训练下中间与小尺寸早期欠训：本次 min 子网 96.9% 低于 max 的 98.1%"],
+          ["子网之间做知识蒸馏（KL 对齐 teacher logits）",
+           "可选开启（<code class=\"inline\">--distill-weight 0.5</code>），默认关",
+           "默认只有共享权重带来的隐式影响，没有显式教师信号"],
           ["BN 重估 + 导出子网 fine-tune", "不需要 BN 重估（本实现用 LayerNorm）；导出也仍未 fine-tune",
            "导出的子网精度低于它在超网里“应得”的水平"],
           ["弹性分辨率、真实延迟目标", "只有参数量代理",

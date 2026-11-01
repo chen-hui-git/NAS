@@ -210,6 +210,13 @@ def plot_sandwich_curves(
     _style()
     fig, (left, right) = plt.subplots(1, 2, figsize=(10.4, 4.2))
 
+    stage_of = [getattr(record, "stage", 0) for record in history]
+    boundaries = [
+        (history[index].step, stage_of[index])
+        for index in range(1, len(history))
+        if stage_of[index] != stage_of[index - 1]
+    ]
+
     steps, max_losses, min_losses, random_losses = _leg_series(history, "role_losses")
     _, max_acc, min_acc, random_acc = _leg_series(history, "role_accuracy")
 
@@ -236,7 +243,23 @@ def plot_sandwich_curves(
             fontsize=8,
             color=MUTED,
         )
-    left.set_title("Loss of each leg (thin = raw, thick = smoothed)")
+    for boundary_step, stage_index in boundaries:
+        for axis in (left, right):
+            axis.axvline(boundary_step, color=MUTED, linestyle="--", linewidth=1.0)
+        left.annotate(
+            f"stage {stage_index}",
+            xy=(boundary_step, 1.0),
+            xycoords=("data", "axes fraction"),
+            xytext=(3, -10),
+            textcoords="offset points",
+            fontsize=7.5,
+            color=MUTED,
+        )
+    left.set_title(
+        "Loss of each leg, dashed = progressive-shrinking stage change"
+        if boundaries
+        else "Loss of each leg (thin = raw, thick = smoothed)"
+    )
     right.set_title("Accuracy of each leg")
     fig.tight_layout()
     return _save(fig, path)

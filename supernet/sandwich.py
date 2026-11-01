@@ -10,6 +10,10 @@ Rationale (slimmable networks, refined by Once-for-All): the max subnet is usual
 best performing one, the min subnet keeps the shared weights honest at the low end, and
 the random legs bring coverage; every subnet also acts as an in-place distillation target
 for the others, because they all update the same weights.
+
+shrink_stages > 1 switches on progressive shrinking (OFA): the sandwich starts with the
+largest configuration only, and smaller depths/widths/kernels join stage by stage until
+the full space is unlocked in the last stage.
 """
 
 from __future__ import annotations
@@ -17,13 +21,15 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass, field
 import random
+import time
 from typing import Callable
 
 from torch import Tensor
 import torch
 
-from .losses import accuracy, classification_loss
+from .losses import accuracy, classification_loss, distillation_loss
 from .search_space import SearchSpace, SubnetSpec
+from .shrink import ShrinkStage, build_shrink_schedule, stage_at
 from .supernet import Supernet
 
 
@@ -37,6 +43,8 @@ class SandwichConfig:
     random_weight: float = 1.0
     grad_clip: float = 1.0
     seed: int = 0
+    shrink_stages: int = 0
+    distill_weight: float = 0.0
 
 @dataclass
 class SandwichStats:
@@ -81,6 +89,7 @@ class StepRecord:
     role_losses: dict[str, float]
     role_accuracy: dict[str, float]
     role_arch_ids: dict[str, str]
+    stage: int = 0
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -90,6 +99,7 @@ class StepRecord:
             "role_losses": dict(self.role_losses),
             "role_accuracy": dict(self.role_accuracy),
             "role_arch_ids": dict(self.role_arch_ids),
+            "stage": self.stage,
         }
 
 
@@ -114,21 +124,46 @@ class SandwichTrainer:
         )
         self.stats = SandwichStats()
         self.step_index = 0
+        self.total_steps: int | None = None
+        self.schedule = build_shrink_schedule(self.space, self.config.shrink_stages)
+
+    def current_stage(self) -> ShrinkStage | None:
+        """The unlocked frontier for the step about to run (None when shrink is off)."""
+        if not self.schedule:
+            return None
+        progress = 1.0 if not self.total_steps else self.step_index / self.total_steps
+        return stage_at(self.schedule, progress)
 
     # [snippet:sandwich-build]
     def build_sandwich(self) -> list[tuple[str, SubnetSpec, float]]:
         """Return the (role, spec, loss_weight) legs of this step's sandwich."""
         config = self.config
+        stage = self.current_stage()
+        space = self.space if stage is None else stage.space(self.space)
         legs: list[tuple[str, SubnetSpec, float]] = [
-            ("max", self.space.max_subnet(), config.max_weight),
-            ("min", self.space.min_subnet(), config.min_weight),
+            ("max", space.max_subnet(), config.max_weight),
+            ("min", space.min_subnet(), config.min_weight),
         ]
         for index in range(config.n_random):
             legs.append(
-                (f"random_{index}", self.space.sample(self.rng), config.random_weight)
+                (f"random_{index}", space.sample(self.rng), config.random_weight)
             )
         return legs
     # [/snippet:sandwich-build]
+
+    def leg_loss(
+        self, logits: Tensor, labels: Tensor, teacher: Tensor | None
+    ) -> Tensor:
+        """Cross-entropy, plus an optional KL term towards the max leg.
+
+        distill_weight = 0 (the default) returns plain cross-entropy, so a run without
+        distillation is exactly the sandwich rule with no extra machinery.
+        """
+        loss = classification_loss(logits, labels)
+        weight = self.config.distill_weight
+        if weight <= 0 or teacher is None:
+            return loss
+        return (1.0 - weight) * loss + weight * distillation_loss(logits, teacher)
 
     # [snippet:sandwich-step]
     def train_step(self, inputs: Tensor, labels: Tensor) -> StepRecord:
@@ -138,9 +173,13 @@ class SandwichTrainer:
         role_accuracy: dict[str, float] = {}
         role_arch_ids: dict[str, str] = {}
         total = 0.0
+        stage = self.current_stage()
+        teacher: Tensor | None = None
         for role, spec, weight in self.build_sandwich():
             logits = self.model(inputs, spec)
-            loss = classification_loss(logits, labels)
+            loss = self.leg_loss(logits, labels, teacher)
+            if role == "max":
+                teacher = logits.detach()   # the max leg is the teacher for every other leg
             if weight > 0:
                 (loss * weight).backward()
             role_losses[role] = float(loss.detach())
@@ -161,6 +200,7 @@ class SandwichTrainer:
             role_losses=role_losses,
             role_accuracy=role_accuracy,
             role_arch_ids=role_arch_ids,
+            stage=0 if stage is None else stage.index,
         )
     # [/snippet:sandwich-step]
 
@@ -170,9 +210,14 @@ class SandwichTrainer:
         steps: int,
         log_every: int = 0,
         on_log: Callable[[StepRecord], None] | None = None,
+        deadline: float | None = None,
     ) -> list[StepRecord]:
+        """Train at most steps times; stop early past an absolute time.monotonic() deadline."""
+        self.total_steps = self.step_index + steps
         history: list[StepRecord] = []
         for step in range(steps):
+            if deadline is not None and time.monotonic() > deadline:
+                break
             inputs, labels = batch_fn(step)
             record = self.train_step(inputs, labels)
             history.append(record)

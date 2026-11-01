@@ -63,6 +63,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=None,
                         help="default 64 on mps, 8 on cpu: measured, not guessed")
     parser.add_argument("--lr", type=float, default=3e-3)
+    parser.add_argument("--shrink-stages", type=int, default=0,
+                        help="progressive shrinking stages; 0 = off (joint training), 4 = OFA style")
+    parser.add_argument("--distill-weight", type=float, default=0.0,
+                        help="KL weight towards the max leg (in-place distillation); 0 = off")
     parser.add_argument("--n-random", type=int, default=2,
                         help="random legs of the sandwich (max and min are always trained)")
     parser.add_argument("--candidates", type=int, default=10,
@@ -141,6 +145,10 @@ def main(argv: list[str] | None = None) -> int:
     say("=" * 68)
     say(f"超网 / 三明治采样教学 Demo    预算 {args.budget:.0f}s   数据集 {args.dataset}")
     say(f"设备 {device}   batch {batch_size}")
+    say(f"渐进收缩 shrink_stages={args.shrink_stages}"
+        f"{'（关闭）' if args.shrink_stages <= 1 else f'（{args.shrink_stages} 级）'}   "
+        f"子网蒸馏 distill_weight={args.distill_weight}"
+        f"{'（关闭）' if args.distill_weight <= 0 else ''}")
     say("=" * 68)
 
     # ---------------------------------------------------------------- data
@@ -162,7 +170,14 @@ def main(argv: list[str] | None = None) -> int:
         max_seq_len=task.seq_len,
     )
     trainer = SandwichTrainer(
-        space, SandwichConfig(lr=args.lr, n_random=args.n_random, seed=args.seed)
+        space,
+        SandwichConfig(
+            lr=args.lr,
+            n_random=args.n_random,
+            seed=args.seed,
+            shrink_stages=args.shrink_stages,
+            distill_weight=args.distill_weight,
+        ),
     )
     trainer.model.to(device)
     max_spec = space.max_subnet()
@@ -199,7 +214,10 @@ def main(argv: list[str] | None = None) -> int:
     step_seconds = max(timings_per_step[len(timings_per_step) // 2], 1e-3)
     remaining = args.budget - (time.monotonic() - started)
     train_budget = max(remaining - args.report_reserve, remaining * 0.25) * args.train_share
-    planned = int(train_budget / step_seconds)
+    # Progressive shrinking makes the first stages cost more per step: all four legs are
+    # the largest subnet (measured 1.75x). 1.4x is the stage-weighted average.
+    cost_factor = 1.4 if args.shrink_stages > 1 else 1.0
+    planned = int(train_budget / (step_seconds * cost_factor))
     planned = max(args.min_steps, min(args.steps, planned))
     say(f"      单步耗时（中位数）  : {step_seconds * 1000:.0f} ms "
         f"(一步 = 1 max + 1 min + {args.n_random} random, "
@@ -235,6 +253,7 @@ def main(argv: list[str] | None = None) -> int:
         steps=max(0, planned - warmup_steps - timed_steps),
         log_every=log_every,
         on_log=on_log,
+        deadline=started + args.budget - args.report_reserve,
     )
     train_seconds = mark("train", phase)
     say(f"      训练完成            : {planned} 步 / "
@@ -391,6 +410,10 @@ def main(argv: list[str] | None = None) -> int:
             "batch_size": args.batch_size,
             "lr": args.lr,
             "n_random": args.n_random,
+            "shrink_stages": args.shrink_stages,
+            "distill_weight": args.distill_weight,
+            "shrink_schedule": [stage.to_dict() for stage in trainer.schedule],
+            "stage_reached": max((record.stage for record in history), default=0),
             "eval_batches": args.eval_batches,
             "standalone_steps": args.standalone_steps,
             "device": device,

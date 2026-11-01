@@ -24,6 +24,10 @@ PYTHONPATH=. python3 examples/run_demo.py --budget 60 --steps 300 --candidates 4
 
 # 完全离线（合成条形图任务，不下载任何数据）
 PYTHONPATH=. python3 examples/run_demo.py --dataset bars
+
+# 两个 OFA 部件：默认关闭，可单独打开（见 docs/comparison.md 的实测对照）
+PYTHONPATH=. python3 examples/run_demo.py --shrink-stages 4        # 渐进收缩
+PYTHONPATH=. python3 examples/run_demo.py --distill-weight 0.5     # 子网蒸馏
 ```
 
 需要 Python 3.10+ 和 PyTorch 2.0+，绘图用 matplotlib，全程只用 Conv1d（没有 `nn.Linear`）。
@@ -78,11 +82,13 @@ supernet/
   tasks.py          任务接口：batch / fixed_batches / batch_fn + 输入归一化
   dataset.py        MNIST 下载+双重校验；MNISTTask
   synthetic.py      合成条形图任务（离线回退）
+  shrink.py         渐进收缩排程（--shrink-stages，默认关）
   viz.py            教学图（matplotlib，headless，英文标签）
   report.py         HTML 报告生成器（代码片段从源码里按标记抽取）
 examples/run_demo.py      端到端演示，带墙钟时间预算
 examples/render_report.py 只重渲染 HTML（改文案不用重新训练）
 docs/instructor_notes.md  教师用：课堂节奏 + 三个问题的参考答案
+docs/comparison.md        三组同预算实测：joint / 渐进收缩 / 子网蒸馏
 tests/test_supernet.py    35 个回归测试
 ```
 
@@ -115,7 +121,12 @@ optimizer.step()
 
 max 子网是质量上限兼“教师”，min 子网防止低端掉队，随机子网覆盖中间地带。
 
-**3. 排序一致性要显式量。** 超网内损失低 ≠ 独立训练后也好（co-adaptation）。
+**3. 两个 OFA 部件做成了开关，默认关。** 渐进收缩（`--shrink-stages N`）与子网蒸馏
+（`--distill-weight λ`）都实现了，但默认不生效——它们和预算强耦合。同预算实测
+（`docs/comparison.md`）：**蒸馏几乎免费且把随机子网从 93.0% 抬到 97.0%；渐进收缩在这个小预算下
+反而把 min 子网从 96.2% 打到 78.0%**，因为解锁太晚、前段单步更贵。
+
+**4. 排序一致性要显式量。** 超网内损失低 ≠ 独立训练后也好（co-adaptation）。
 `rank.py` 抽 K 个候选，先用超网打分，再把每个候选**从零独立训练同样步数**打分，
 报告 τ / ρ / top-1 一致性 / regret。这是超网最容易被忽略的失效模式。
 

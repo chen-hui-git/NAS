@@ -25,6 +25,7 @@ from supernet import (  # noqa: E402
     accuracy,
     average_subnet_loss,
     build_dense_subnet,
+    build_shrink_schedule,
     classification_loss,
     kendall_tau,
     make_task,
@@ -436,6 +437,97 @@ class SchematicFigureTests(unittest.TestCase):
             )
             self.assertTrue(path.exists())
             self.assertGreater(path.stat().st_size, 4000)
+
+
+class ProgressiveShrinkingTests(unittest.TestCase):
+    def test_fewer_than_two_stages_means_off(self) -> None:
+        self.assertEqual(build_shrink_schedule(TEST_SPACE, 0), ())
+        self.assertEqual(build_shrink_schedule(TEST_SPACE, 1), ())
+
+    def test_first_stage_unlocks_only_the_largest(self) -> None:
+        first = build_shrink_schedule(TEST_SPACE, 4)[0]
+        self.assertEqual(first.min_depth, TEST_SPACE.max_depth)
+        self.assertEqual(first.embed_dims, (TEST_SPACE.max_embed_dim,))
+        self.assertEqual(first.ffn_ratios, (max(TEST_SPACE.ffn_ratios),))
+        self.assertEqual(first.ffn_kernels, (max(TEST_SPACE.ffn_kernels),))
+
+    def test_last_stage_is_the_full_space(self) -> None:
+        last = build_shrink_schedule(TEST_SPACE, 4)[-1]
+        self.assertEqual(last.min_depth, TEST_SPACE.min_depth)
+        self.assertEqual(tuple(sorted(last.embed_dims)), tuple(sorted(TEST_SPACE.embed_dims)))
+        self.assertEqual(tuple(sorted(last.ffn_ratios)), tuple(sorted(TEST_SPACE.ffn_ratios)))
+        self.assertEqual(tuple(sorted(last.ffn_kernels)), tuple(sorted(TEST_SPACE.ffn_kernels)))
+        self.assertAlmostEqual(last.until, 1.0)
+
+    def test_frontier_only_widens(self) -> None:
+        stages = build_shrink_schedule(TEST_SPACE, 4)
+        depths = [stage.min_depth for stage in stages]
+        self.assertEqual(depths, sorted(depths, reverse=True))
+        for smaller, bigger in zip(stages, stages[1:]):
+            self.assertLessEqual(len(smaller.embed_dims), len(bigger.embed_dims))
+            self.assertTrue(set(smaller.embed_dims) <= set(bigger.embed_dims))
+            self.assertTrue(set(smaller.ffn_kernels) <= set(bigger.ffn_kernels))
+
+    def test_early_stage_trains_only_the_largest_subnets(self) -> None:
+        trainer = SandwichTrainer(
+            TEST_SPACE, SandwichConfig(n_random=2, seed=0, shrink_stages=4)
+        )
+        trainer.total_steps = 100
+        trainer.step_index = 0
+        for _, spec, _ in trainer.build_sandwich():
+            self.assertEqual(spec.depth, TEST_SPACE.max_depth)
+            self.assertEqual(spec.embed_dim, TEST_SPACE.max_embed_dim)
+            for layer in spec.layers:
+                self.assertEqual(layer.ffn_ratio, max(TEST_SPACE.ffn_ratios))
+                self.assertEqual(layer.ffn_kernel, max(TEST_SPACE.ffn_kernels))
+
+    def test_last_stage_reaches_the_cheapest_subnet(self) -> None:
+        trainer = SandwichTrainer(
+            TEST_SPACE, SandwichConfig(n_random=0, seed=0, shrink_stages=4)
+        )
+        trainer.total_steps = 100
+        trainer.step_index = 99
+        _, minimum, _ = trainer.build_sandwich()[1]
+        self.assertEqual(minimum, TEST_SPACE.min_subnet())
+
+    def test_each_step_records_its_stage(self) -> None:
+        trainer = SandwichTrainer(
+            TEST_SPACE, SandwichConfig(n_random=1, seed=0, shrink_stages=2)
+        )
+        history = trainer.train(TEST_TASK.batch_fn(4, seed=0), steps=6)
+        self.assertEqual(history[0].stage, 0)
+        self.assertEqual(history[-1].stage, 1)
+
+
+class DistillationTests(unittest.TestCase):
+    def _record(self, distill_weight: float):
+        trainer = SandwichTrainer(
+            TEST_SPACE, SandwichConfig(n_random=1, seed=0, distill_weight=distill_weight)
+        )
+        return trainer.train_step(make_inputs(4), make_labels(4))
+
+    def test_off_by_default(self) -> None:
+        self.assertEqual(SandwichConfig().distill_weight, 0.0)
+
+    def test_distillation_changes_only_the_non_teacher_legs(self) -> None:
+        plain = self._record(0.0).role_losses
+        distilled = self._record(0.5).role_losses
+        self.assertAlmostEqual(plain["max"], distilled["max"], places=6)
+        self.assertNotAlmostEqual(plain["random_0"], distilled["random_0"], places=4)
+
+    def test_teacher_is_the_max_leg(self) -> None:
+        trainer = SandwichTrainer(
+            TEST_SPACE, SandwichConfig(n_random=1, seed=0, distill_weight=1.0)
+        )
+        inputs, labels = make_inputs(4), make_labels(4)
+        before = {name: value.detach().clone() for name, value in trainer.model.state_dict().items()}
+        record = trainer.train_step(inputs, labels)
+        trainer.model.load_state_dict(before)   # undo the step to recompute the teacher loss
+        with torch.no_grad():
+            expected = float(
+                classification_loss(trainer.model(inputs, TEST_SPACE.max_subnet()), labels)
+            )
+        self.assertAlmostEqual(record.role_losses["max"], expected, places=4)
 
 
 if __name__ == "__main__":
