@@ -1,4 +1,4 @@
-"""One-shot supernet demo: an elastic Conv1d Transformer trained with the sandwich rule."""
+"""一次性（one-shot）超网实践：用三明治规则训练一个弹性 Conv1d Transformer。"""
 
 from __future__ import annotations
 

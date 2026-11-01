@@ -1,4 +1,4 @@
-"""The weight-sharing supernet and the subnet export path."""
+"""权重共享的超网本体，以及子网导出路径。"""
 
 from __future__ import annotations
 
@@ -10,13 +10,12 @@ from .search_space import LayerCapacity, SearchSpace, SubnetSpec, point_space
 
 
 class Supernet(nn.Module):
-    """Maximum-width, maximum-depth digit classifier in which every subnet is a slice.
+    """最宽、最深的数字分类器，其中每个子网都是一次切片。
 
-    The input is a (batch, input_features, seq_len) tensor: for MNIST each of the 28
-    image rows is one token whose features are the 28 pixel values of that row. Depth is
-    elastic by truncation: a subnet of depth L runs layers 0..L-1. Width, head size and
-    the per-block FFN choice are elastic by leading-channel slicing. All of it is one
-    parameter set, so 4..10 layers x 3 widths x 6 FFN branches share one optimizer state.
+    输入是 (batch, input_features, seq_len)：对 MNIST 来说，28 行图像各是一个 token，
+    它的特征就是该行的 28 个像素值。深度靠截断伸缩：深度 L 的子网只跑 0..L-1 层。
+    宽度、head 大小与逐 block 的 FFN 选择靠"取前 N 个通道"伸缩。全部是一套参数，
+    所以 4..10 层 × 3 种宽度 × 6 条 FFN 分支共用一个优化器状态。
     """
 
     def __init__(
@@ -45,7 +44,7 @@ class Supernet(nn.Module):
 
     # [snippet:supernet-forward]
     def forward(self, inputs: Tensor, spec: SubnetSpec) -> Tensor:
-        """Run one subnet over a batch; returns class logits (batch, num_classes)."""
+        """用某一个子网跑一个批次；返回类别 logits，形状 (batch, num_classes)。"""
         features, seq = inputs.shape[1], inputs.shape[2]
         dim = spec.embed_dim
         x = self.input_proj(inputs, dim, features) + self.pos[:, :dim, :seq]
@@ -66,7 +65,7 @@ class Supernet(nn.Module):
 
     @torch.no_grad()
     def predict(self, inputs: Tensor, spec: SubnetSpec) -> Tensor:
-        """Predicted class indices for a batch."""
+        """返回一个批次的预测类别索引。"""
         was_training = self.training
         self.eval()
         labels = self(inputs, spec).argmax(dim=1)
@@ -75,7 +74,7 @@ class Supernet(nn.Module):
         return labels
 
     def subnet_parameter_count(self, spec: SubnetSpec) -> int:
-        """Analytic parameter count of one subnet, excluding unused branches."""
+        """解析式计算单个子网的参数量，不计未被用到的分支。"""
         dim = spec.embed_dim
         classes = self.space.num_classes
         total = self.space.input_features * dim + dim
@@ -94,7 +93,7 @@ class Supernet(nn.Module):
 
     @torch.no_grad()
     def export_subnet(self, spec: SubnetSpec) -> "Supernet":
-        """Copy one subnet into a standalone model that holds only its own weights."""
+        """把某个子网拷贝成一个独立模型，里面只保留它自己的权重。"""
         point, capacities = point_space(spec, self.space)
         exported = Supernet(point, capacities=capacities)
         copy_subnet_weights(exported, self, spec)
@@ -104,7 +103,7 @@ class Supernet(nn.Module):
 
 @torch.no_grad()
 def copy_subnet_weights(target: Supernet, source: Supernet, spec: SubnetSpec) -> None:
-    """Slice the shared weights of source into the narrower target."""
+    """把 source 的共享权重切片后写入更窄的 target。"""
     dim = spec.embed_dim
     _copy_conv(target.input_proj, source.input_proj, dim, source.space.input_features)
     target.pos.copy_(source.pos[:, :dim, :])

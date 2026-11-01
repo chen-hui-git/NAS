@@ -1,11 +1,8 @@
-"""Elastic building blocks.
+"""弹性基础模块。
 
-Every weight tensor is allocated for the *widest* subnet and a narrower subnet uses
-the leading input/output channels of that tensor. This leading-slice trick is the
-standard one-shot NAS approximation (OFA): one shared tensor serves every subnet, so
-the whole family trains with a single optimizer state. Slicing changes which weights
-are used but never mixes two branches, so an unused branch cannot leak into the
-output of a subnet.
+每个权重张量都按"最宽子网"分配，窄子网只用该张量靠前的输入/输出通道。这个"取前缀"的技巧
+是 one-shot NAS 的标准近似（OFA）：一个共享张量服务所有子网，整个族共用一个优化器状态。
+切片只改变"用到哪些权重"，绝不混合两条分支，因此未被使用的分支不会泄漏进子网的输出。
 """
 
 from __future__ import annotations
@@ -28,7 +25,7 @@ def branch_key(ffn_ratio: int, ffn_kernel: int) -> str:
 
 
 class ElasticConv1d(nn.Module):
-    """Conv1d whose leading out_channels / in_channels form the active slice."""
+    """Conv1d：靠前的 out_channels / in_channels 构成当前生效的切片。"""
 
     def __init__(
         self,
@@ -65,7 +62,7 @@ class ElasticConv1d(nn.Module):
 
 
 class ElasticLayerNorm(nn.Module):
-    """LayerNorm over channels, sliced to the subnet width."""
+    """按通道做 LayerNorm，并切到子网宽度。"""
 
     def __init__(self, max_channels: int, eps: float = 1e-5) -> None:
         super().__init__()
@@ -83,7 +80,7 @@ class ElasticLayerNorm(nn.Module):
 
 
 class ElasticAttention(nn.Module):
-    """Multi-head self-attention over the token sequence, elastic width and head size."""
+    """token 序列上的多头自注意力，宽度与 head 大小均可伸缩。"""
 
     def __init__(self, max_dim: int) -> None:
         super().__init__()
@@ -106,7 +103,7 @@ class ElasticAttention(nn.Module):
 
 
 class _FFNBranch(nn.Module):
-    """One (ratio, kernel) Conv1d feed-forward branch, sized at max capacity."""
+    """一条 (ratio, kernel) 的 Conv1d 前馈分支，按最大容量分配参数。"""
 
     def __init__(self, max_dim: int, ratio: int, kernel: int) -> None:
         super().__init__()
@@ -124,7 +121,7 @@ class _FFNBranch(nn.Module):
 
 
 class ElasticFFN(nn.Module):
-    """A set of Conv1d feed-forward branches; a subnet activates exactly one."""
+    """一组 Conv1d 前馈分支；一个子网只激活其中一条。"""
 
     def __init__(
         self, max_dim: int, ratios: tuple[int, ...], kernels: tuple[int, ...]
@@ -147,7 +144,7 @@ class ElasticFFN(nn.Module):
 
 
 class ElasticBlock(nn.Module):
-    """Pre-norm Transformer block with elastic width, head size and FFN choice."""
+    """pre-norm Transformer block，宽度、head 大小与 FFN 分支均可伸缩。"""
 
     def __init__(
         self, max_dim: int, ratios: tuple[int, ...], kernels: tuple[int, ...]

@@ -201,7 +201,7 @@ x = x + conv1d_k( LayerNorm(x) , out = dim x ratio )    ← kernel、ratio 来�
     <span class="tok-keyword">return</span> <span class="tok-keyword">self</span>.branches[branch_key(ffn_ratio, ffn_kernel)](x, dim, activation)</code></pre></div>
   <p>整网前向就变成“截断深度 + 一路切片”：</p>
   <div class="code"><div class="code-head">supernet/supernet.py &middot; snippet supernet-forward</div><pre><code><span class="tok-keyword">def</span> forward(<span class="tok-keyword">self</span>, inputs: Tensor, spec: SubnetSpec) -&gt; Tensor:
-    <span class="tok-string">&quot;&quot;&quot;Run one subnet over a batch; returns class logits (batch, num_classes).&quot;&quot;&quot;</span>
+    <span class="tok-string">&quot;&quot;&quot;用某一个子网跑一个批次；返回类别 logits，形状 (batch, num_classes)。&quot;&quot;&quot;</span>
     features, seq = inputs.shape[<span class="tok-number">1</span>], inputs.shape[<span class="tok-number">2</span>]
     dim = spec.embed_dim
     x = <span class="tok-keyword">self</span>.input_proj(inputs, dim, features) + <span class="tok-keyword">self</span>.pos[:, :dim, :seq]
@@ -241,7 +241,7 @@ x = x + conv1d_k( LayerNorm(x) , out = dim x ratio )    ← kernel、ratio 来�
   </ol>
   <p>四条腿的损失求和后<b>只做一次 optimizer step</b>，所以步数预算的口径是“4 个子网 / 步”。</p>
   <div class="code"><div class="code-head">supernet/sandwich.py &middot; snippet sandwich-build</div><pre><code><span class="tok-keyword">def</span> build_sandwich(<span class="tok-keyword">self</span>) -&gt; list[tuple[str, SubnetSpec, float]]:
-    <span class="tok-string">&quot;&quot;&quot;Return the (role, spec, loss_weight) legs of this step&#x27;s sandwich.&quot;&quot;&quot;</span>
+    <span class="tok-string">&quot;&quot;&quot;返回这一步三明治的 (角色, spec, 损失权重) 各条腿。&quot;&quot;&quot;</span>
     config = <span class="tok-keyword">self</span>.config
     stage = <span class="tok-keyword">self</span>.current_stage()
     space = <span class="tok-keyword">self</span>.space <span class="tok-keyword">if</span> stage <span class="tok-keyword">is</span> <span class="tok-keyword">None</span> <span class="tok-keyword">else</span> stage.space(<span class="tok-keyword">self</span>.space)
@@ -488,7 +488,7 @@ tests/test_supernet.py 35 个回归测试</pre>
 </section>
 
 <footer>
-  由 <code class="inline">examples/run_demo.py</code> 自动生成 · 2026-11-01 17:29:16 ·
+  由 <code class="inline">examples/run_demo.py</code> 自动生成 · 2026-11-01 17:37:23 ·
   图中标签使用英文，因为 matplotlib 默认字体没有中文字形。
 </footer>
 

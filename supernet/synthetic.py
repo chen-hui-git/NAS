@@ -1,8 +1,7 @@
-"""Offline fallback task: synthetic images of a bright bar.
+"""离线回退任务：合成"亮条"图像。
 
-Class d is a bright bar of a few rows placed at a class-specific position, plus gaussian
-noise. Nothing here is a real dataset -- it exists so the demo still runs with no
-network.
+类别 d 对应一条亮度为 1 的横条，位置由类别决定，其余像素是高斯噪声。这不是真实数据集，
+存在的意义只是让 demo 在没有网络时也能跑通链路。
 """
 
 from __future__ import annotations
@@ -14,7 +13,7 @@ from .tasks import Batch, Task, normalize_images
 
 
 class BarsTask(Task):
-    """Ten classes of bar position; trivially learnable, useful only as a smoke test."""
+    """十个"条带位置"类别；极易学习，只适合当冒烟测试用。"""
 
     name = "synthetic-bars"
     num_classes = 10
@@ -34,7 +33,7 @@ class BarsTask(Task):
         self.seq_len = seq_len
 
     def _render(self, labels: Tensor, generator: torch.Generator | None) -> Tensor:
-        """Draw one bar per sample; returns pixels in [0, 1] of shape (n, rows, cols)."""
+        """每个样本画一条横条；返回形状 (n, rows, cols)、取值在 [0, 1] 的像素。"""
         count = int(labels.numel())
         pixels = self.noise * torch.randn(
             count, self.seq_len, self.input_features, generator=generator
@@ -51,7 +50,7 @@ class BarsTask(Task):
         return self._finish(normalize_images(self._render(labels, generator)), labels)
 
     def preview(self) -> tuple[Tensor, Tensor]:
-        """One deterministic sample per class, as uint8 images for the report figure."""
+        """每个类别取一张确定性样本，返回 uint8 图像供报告插图使用。"""
         labels = torch.arange(self.num_classes)
         pixels = self._render(labels, torch.Generator().manual_seed(0))
         images = (pixels * 255).round().to(torch.uint8)

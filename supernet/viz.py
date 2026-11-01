@@ -1,7 +1,7 @@
-"""Figures for the supernet demo report.
+"""超网报告用的插图。
 
-Headless matplotlib only. Every figure uses English labels because the default
-matplotlib font has no CJK glyphs; the surrounding HTML report is in Chinese.
+只用无头 matplotlib。图内文字一律英文，因为 matplotlib 默认字体没有中文字形；
+外层的 HTML 报告是中文。
 """
 
 from __future__ import annotations
@@ -58,7 +58,7 @@ def _save(fig, path: Path) -> Path:
 
 
 def _cell_size(max_dim: int, dim: int, max_cells: int = 16) -> int:
-    """Largest divisor shared by both widths that still gives a readable grid."""
+    """两个宽度共有的最大约数，且保证网格格数仍然好读。"""
     common = [c for c in range(1, min(max_dim, dim) + 1) if max_dim % c == 0 and dim % c == 0]
     usable = [c for c in common if max_dim // c <= max_cells]
     return min(usable) if usable else max(common)
@@ -72,10 +72,10 @@ def plot_slicing_schematic(
     ffn_ratios: tuple[int, ...],
     ffn_kernels: tuple[int, ...],
 ) -> Path:
-    """Draw the exact slice one concrete subnet takes, straight from its spec.
+    """按 spec 画出某个具体子网真实切走的那一块。
 
-    Nothing here is a placeholder: the grid scale comes from max_embed_dim and the
-    subnet width, and the per-layer matrix shows the branch each layer actually chose.
+    图里没有占位数字：网格尺度来自 max_embed_dim 与子网宽度，右侧逐层矩阵显示的是
+    每一层实际选中的分支。
     """
     _style()
     embed_dim = int(spec["embed_dim"])
@@ -92,7 +92,7 @@ def plot_slicing_schematic(
         gridspec_kw={"width_ratios": [1.05, 1.35]},
     )
 
-    # ---- left: the shared weight tensor and the block this subnet uses
+    # ---- 左侧：共享权重张量，以及这个子网用到的那一块
     for row in range(cells_max):
         for column in range(cells_max):
             active = row < cells_sub and column < cells_sub
@@ -145,7 +145,7 @@ def plot_slicing_schematic(
             color=MUTED,
         )
 
-    # ---- right: which FFN branch each layer picked
+    # ---- 右侧：每一层选中的 FFN 分支
     keys = [f"r{ratio}k{kernel}" for ratio in ffn_ratios for kernel in ffn_kernels]
     for layer_index, layer in enumerate(layers):
         chosen = f"r{int(layer['ffn_ratio'])}k{int(layer['ffn_kernel'])}"
@@ -189,7 +189,7 @@ def plot_slicing_schematic(
 
 
 def _leg_series(history: list, key: str) -> tuple[list[float], list[float], list[float], list[float]]:
-    """Extract (steps, max, min, random-mean) series from step records."""
+    """从每步记录里取出 (步数, max, min, 随机均值) 四条序列。"""
     steps = [record.step for record in history]
     max_values = []
     min_values = []
@@ -206,11 +206,10 @@ def _leg_series(history: list, key: str) -> tuple[list[float], list[float], list
 def plot_sandwich_curves(
     history: list, path: Path, chance_loss: float | None = None
 ) -> Path:
-    """Training loss and accuracy of each sandwich leg, step by step."""
+    """逐步绘制三明治各条腿的训练损失与准确率。"""
     _style()
     if not history:
-        # Nothing was trained (e.g. the deadline expired immediately). Draw a note
-        # instead of crashing on an empty series.
+        # 一步都没训练（例如截止时间立即到期）：画一条注释，而不是在空序列上崩掉。
         fig, axis = plt.subplots(figsize=(7.4, 2.6))
         axis.axis("off")
         axis.text(0.5, 0.5, "no training steps were run", ha="center", va="center",
@@ -279,7 +278,7 @@ def plot_predictions(
     predictions: dict,
     path: Path,
 ) -> Path:
-    """One test image per class, with true and predicted labels for two subnets."""
+    """每个类别一张测试图，并给出两个子网的预测与真实标签。"""
     _style()
     import numpy as np
 
@@ -324,7 +323,7 @@ def _smooth(values: list[float], window: int = 15) -> list[float]:
 
 
 def plot_coverage(stats, path: Path) -> Path:
-    """Coverage of the space: proof that the sandwich touches every depth and branch."""
+    """空间覆盖情况：证明三明治真的碰到了每个深度与每条分支。"""
     _style()
     fig, axes = plt.subplots(1, 3, figsize=(10.2, 3.4))
     panels = (
@@ -346,7 +345,7 @@ def plot_coverage(stats, path: Path) -> Path:
 
 
 def plot_family_curve(depth_rows: list, width_rows: list, path: Path) -> Path:
-    """One training run, a whole family of subnets: depth curve and cost/quality scatter."""
+    """一次训练、一整个子网族：深度曲线与"成本-质量"散点。"""
     _style()
     fig, (left, right) = plt.subplots(1, 2, figsize=(10.0, 4.1))
 
@@ -376,7 +375,7 @@ def plot_family_curve(depth_rows: list, width_rows: list, path: Path) -> Path:
 
 
 def plot_ranking_scatter(result: dict, path: Path) -> Path:
-    """The caveat: supernet ranking vs from-scratch ranking."""
+    """那个必须说清的坑：超网内排序 vs 从零训练排序。"""
     _style()
     rows = result["candidates"]
     fig, axis = plt.subplots(figsize=(6.2, 4.6))

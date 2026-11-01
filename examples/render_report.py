@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Re-render the HTML report from an existing metrics.json and figures.
+"""用已有的 metrics.json 与图片重新渲染 HTML 报告。
 
-No training happens here: this is for editing the report wording and re-emitting the
-same numbers. Run examples/run_demo.py to produce new numbers.
+这里不训练：它只用于修改报告文字并重新输出同一批数字。
+要产生新数字请跑 examples/run_demo.py。
 
     PYTHONPATH=. python3 examples/render_report.py
 """
@@ -59,8 +59,8 @@ def main(argv: list[str] | None = None) -> int:
     else:
         source = "metrics.json example_spec"
 
-    # Redraw the schematic from the very spec the text shows, so figure and text can
-    # never disagree even when metrics.json came from an older run.
+    # 按正文所显示的同一个 spec 重画示意图，这样即使 metrics.json 来自旧运行，
+    # 图与文字也不会互相矛盾。
     space_meta = metrics["run"]["space"]
     from supernet import viz
 

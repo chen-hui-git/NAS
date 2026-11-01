@@ -1,13 +1,10 @@
-"""Progressive shrinking: train the biggest subnet first, then unlock smaller ones.
+"""渐进收缩：先把最大子网训好，再逐步解锁更小的子网。
 
-This is the training schedule OFA (arXiv:1908.09791) uses to make one-shot supernets
-usable: instead of training the whole elastic family from scratch at once, start with the
-largest configuration, then repeatedly lower the frontier and let the newly unlocked
-smaller subnets join the sandwich. The frontier only ever widens, so nothing that was
-once trained becomes unreachable.
+这是 OFA（arXiv:1908.09791）用来让 one-shot 超网可用的训练日程：不是一上来就把整个弹性族
+同时从零训练，而是从最大配置开始，反复下移"前沿"，让新解锁的小子网加入三明治。前沿只会变宽，
+所以一旦训练过的子网不会变得不可达。
 
-The schedule is expressed as stage *fractions* of the planned step budget, so it adapts to
-whatever step count the demo's planner ends up choosing.
+日程用"占计划步数的比例"表达，因此能适配规划器最终选出的任何步数。
 """
 
 from __future__ import annotations
@@ -19,7 +16,7 @@ from .search_space import SearchSpace
 
 @dataclass(frozen=True)
 class ShrinkStage:
-    """One stage of progressive shrinking: which sizes are unlocked."""
+    """渐进收缩的一个阶段：哪些尺寸被解锁。"""
 
     index: int
     until: float  # cumulative fraction of the budget at which this stage ends
@@ -29,7 +26,7 @@ class ShrinkStage:
     ffn_kernels: tuple[int, ...]
 
     def space(self, space: SearchSpace) -> SearchSpace:
-        """The search space as it looks during this stage (maxima unchanged)."""
+        """本阶段视角下的搜索空间（上界不变，只是下界收窄）。"""
         return replace(
             space,
             min_depth=self.min_depth,
@@ -54,11 +51,10 @@ def _keep_largest(values: tuple[int, ...], count: int) -> tuple[int, ...]:
 
 
 def build_shrink_schedule(space: SearchSpace, stages: int) -> tuple[ShrinkStage, ...]:
-    """Equal-length stages that unlock smaller sizes step by step.
+    """等长的若干阶段，逐级解锁更小的尺寸。
 
-    Stage 0 is the single largest configuration; the last stage is the full space.
-    depths descend from max_depth to min_depth, widths/ratios/kernels keep the largest
-    entries first and grow their unlocked set while always keeping the maximum.
+    第 0 阶段只有最大配置，最后一个阶段就是完整空间：深度从 max_depth 逐步降到 min_depth，
+    宽度/ratio/kernel 从"只留最大项"开始逐步变大，且始终保留最大值（否则 max 腿就不再是全局最大子网）。
     """
     if stages <= 1:
         return ()
@@ -87,7 +83,7 @@ def build_shrink_schedule(space: SearchSpace, stages: int) -> tuple[ShrinkStage,
 
 
 def stage_at(schedule: tuple[ShrinkStage, ...], progress: float) -> ShrinkStage:
-    """The stage covering a fraction of the budget (the last one when past the end)."""
+    """返回覆盖该预算比例的阶段（超出末尾时返回最后一个）。"""
     for stage in schedule:
         if progress <= stage.until:
             return stage

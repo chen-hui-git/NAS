@@ -1,4 +1,4 @@
-"""Regression tests for the supernet, the sandwich rule and the ranking metrics."""
+"""超网、三明治规则与排序指标的回归测试。"""
 
 from __future__ import annotations
 
@@ -402,7 +402,7 @@ class ReportTests(unittest.TestCase):
 
 
 class SchematicFigureTests(unittest.TestCase):
-    """The slicing figure must come from the spec, not from placeholder numbers."""
+    """切片示意图必须由 spec 画出，不能出现占位数字。"""
 
     def test_cell_size_keeps_the_grid_readable(self) -> None:
         try:

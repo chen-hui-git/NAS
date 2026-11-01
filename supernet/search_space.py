@@ -1,9 +1,7 @@
-"""Declarative search space for an elastic (weight-sharing) Conv1d Transformer.
+"""弹性（权重共享）Conv1d Transformer 的声明式搜索空间。
 
-A subnet is described by a frozen SubnetSpec that carries no tensor state. Specs can
-therefore be logged, hashed and replayed exactly, which is what makes a supernet
-usable as a *fitness function* for a search policy: the policy only ever emits data,
-never model code.
+一个子网由冻结的 SubnetSpec 描述，里面不含任何张量状态。因此 spec 可以被记录、哈希、精确重放，
+这也是超网能作为搜索策略的"适应度函数"的前提：策略只输出数据，永远不输出模型代码。
 """
 
 from __future__ import annotations
@@ -25,7 +23,7 @@ ACTIVATIONS = ("gelu", "silu")
 
 @dataclass(frozen=True)
 class LayerChoice:
-    """Per-block elastic knobs: Conv1d feed-forward expansion, kernel and activation."""
+    """每个 block 的弹性旋钮：Conv1d 前馈层的扩张倍数、卷积核大小与激活函数。"""
 
     ffn_ratio: int
     ffn_kernel: int
@@ -41,7 +39,7 @@ class LayerChoice:
 
 @dataclass(frozen=True)
 class SubnetSpec:
-    """One point in the search space: elastic depth + width + per-block choice."""
+    """搜索空间中的一个点：弹性深度 + 宽度 + 逐 block 的选择。"""
 
     depth: int
     embed_dim: int
@@ -58,7 +56,7 @@ class SubnetSpec:
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
 
     def _signature(self) -> dict[str, Any]:
-        """The fields that define the architecture, without the derived hash."""
+        """定义架构本身的字段，不含由它们推导出的哈希值。"""
         return {
             "depth": self.depth,
             "embed_dim": self.embed_dim,
@@ -85,7 +83,7 @@ class SubnetSpec:
 
 @dataclass(frozen=True)
 class LayerCapacity:
-    """Which branches a supernet layer instantiates for its elastic FFN."""
+    """某个超网层为弹性 FFN 实例化了哪些分支。"""
 
     ratios: tuple[int, ...]
     kernels: tuple[int, ...]
@@ -93,7 +91,7 @@ class LayerCapacity:
 
 @dataclass(frozen=True)
 class SearchSpace:
-    """Frozen space definition; the supernet is sized by its maxima."""
+    """冻结的空间定义；超网的尺寸由各项最大值决定。"""
 
     min_depth: int = MIN_DEPTH
     max_depth: int = MAX_DEPTH
@@ -131,7 +129,7 @@ class SearchSpace:
         return max(self.ffn_kernels)
 
     def max_subnet(self) -> SubnetSpec:
-        """The most expensive subnet: the "max" leg of the sandwich rule."""
+        """最贵的子网：三明治规则里的 max 腿。"""
         embed_dim = max(self.embed_dims)
         head_dim = self._head_dim_for(embed_dim, prefer="min")
         layer = LayerChoice(max(self.ffn_ratios), max(self.ffn_kernels), self.activations[0])
@@ -143,7 +141,7 @@ class SearchSpace:
         )
 
     def min_subnet(self) -> SubnetSpec:
-        """The cheapest subnet: the "min" leg of the sandwich rule."""
+        """最便宜的子网：三明治规则里的 min 腿。"""
         embed_dim = min(self.embed_dims)
         head_dim = self._head_dim_for(embed_dim, prefer="max")
         layer = LayerChoice(min(self.ffn_ratios), min(self.ffn_kernels), self.activations[0])
@@ -159,7 +157,7 @@ class SearchSpace:
         return min(candidates) if prefer == "min" else max(candidates)
 
     def sample(self, rng: "random.Random | None" = None) -> SubnetSpec:
-        """Sample one subnet uniformly over depth, width and per-layer choices."""
+        """在深度、宽度与逐层选择上均匀采样一个子网。"""
         source = random if rng is None else rng
         depth = source.randint(self.min_depth, self.max_depth)
         embed_dim, head_dim = source.choice(self.valid_dim_pairs())
@@ -193,10 +191,9 @@ class SearchSpace:
 def point_space(
     spec: SubnetSpec, space: SearchSpace
 ) -> tuple[SearchSpace, tuple[LayerCapacity, ...]]:
-    """Collapse the space onto a single subnet.
+    """把空间收缩到单个子网。
 
-    The result admits exactly spec and instantiates only the branches that spec
-    needs, which is how a subnet is exported into a standalone model.
+    返回的空间恰好只接受 spec，并且只实例化 spec 用到的那些分支——子网导出成独立模型就是靠它。
     """
     point = SearchSpace(
         min_depth=spec.depth,

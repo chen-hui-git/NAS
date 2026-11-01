@@ -1,8 +1,7 @@
-"""Render the self-contained HTML report for one demo run.
+"""为一次运行渲染自包含的 HTML 报告。
 
-The prose is static; every number, figure and code excerpt comes from the run that
-produced it. Code is read from the real source files through snippet markers, so the
-report can never drift from the implementation.
+文字部分是静态的；所有数字、图与代码片段都来自产生它们的那次运行。代码片段通过标记
+从真实源文件中抽取，因此报告永远不会和实现走样。
 """
 
 from __future__ import annotations
@@ -104,7 +103,7 @@ TOKEN = re.compile(
 
 
 def read_snippet(relative_path: str, name: str) -> str:
-    """Extract a marked region of a real source file, dedented."""
+    """从真实源文件中抽取被标记的一段代码，并去掉公共缩进。"""
     text = (ROOT / relative_path).read_text(encoding="utf-8")
     captured: list[str] = []
     capturing = False
@@ -203,7 +202,7 @@ def _millions(value: int) -> str:
 
 
 def build_report(context: dict, out_path: Path) -> Path:
-    """Write a single self-contained HTML file (figures embedded as base64)."""
+    """写出单个自包含 HTML 文件（图片以 base64 内嵌）。"""
     run = context["run"]
     space = run["space"]
     params = run["params"]

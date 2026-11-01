@@ -1,11 +1,9 @@
-"""Does the supernet rank subnets the way standalone training does?
+"""超网给出的子网排序，和独立训练得到的排序一致吗？
 
-This is the failure mode that makes one-shot NAS dangerous: shared weights are trained
-under co-adaptation, so their ordering of subnets can disagree with the ordering you get
-by training each subnet from scratch. The experiment below samples candidates, scores
-them inside the supernet, trains each of them independently with an identical budget, and
-reports Kendall tau / Spearman rho between the two rankings plus the regret of trusting
-the supernet's top-1.
+这正是 one-shot NAS 最危险的失效模式：共享权重是在"互相适配"的前提下训出来的，
+所以它的子网排序可能和"把每个子网从零训练一遍"得到的排序不一致。下面的实验抽取若干候选，
+先在超网内打分，再让每个候选以相同预算独立训练后打分，最后报告两个排序之间的
+Kendall τ / Spearman ρ，以及"相信超网 top-1"要付的 regret。
 """
 
 from __future__ import annotations
@@ -35,7 +33,7 @@ class RankingExperimentConfig:
     seed: int = 0
 
 def build_dense_subnet(space: SearchSpace, spec: SubnetSpec) -> Supernet:
-    """A standalone model with exactly one subnet's parameters and no sharing."""
+    """独立模型：只包含一个子网的参数，没有任何共享。"""
     point, capacities = point_space(spec, space)
     return Supernet(point, capacities=capacities)
 
@@ -54,7 +52,7 @@ def average_subnet_loss(model: Supernet, spec: SubnetSpec, batches: list[Batch])
 
 @torch.no_grad()
 def subnet_accuracy(model: Supernet, spec: SubnetSpec, batches: list[Batch]) -> float:
-    """Fraction of correctly classified samples over the given batches."""
+    """在给定批次上分类正确的样本比例。"""
     was_training = model.training
     model.eval()
     correct = 0
@@ -70,7 +68,7 @@ def subnet_accuracy(model: Supernet, spec: SubnetSpec, batches: list[Batch]) -> 
 def evaluate_specs(
     model: Supernet, specs: list[SubnetSpec], batches: list[Batch]
 ) -> list[float]:
-    """Validation loss of several subnets inside the same weights."""
+    """同一份权重下若干子网的验证损失。"""
     return [average_subnet_loss(model, spec, batches) for spec in specs]
 
 
@@ -82,7 +80,7 @@ def train_standalone(
     *,
     seed: int,
 ) -> Supernet:
-    """Train one subnet from scratch on an identical data stream and step budget."""
+    """在完全相同的数据流与步数预算下，把某个子网从零训练一遍。"""
     torch.manual_seed(seed)
     device = getattr(task, "device", "cpu")
     model = build_dense_subnet(space, spec).to(device)
@@ -110,12 +108,11 @@ def fine_tune_subnet(
     batch_size: int = 128,
     seed: int = 0,
 ) -> Supernet:
-    """Export one subnet and keep training it alone: post-hoc specialization.
+    """把某个子网导出后单独继续训练：事后的专化（fine-tune）。
 
-    The exported model starts from the shared supernet's sliced weights, so its first
-    score is exactly its in-supernet score. The learning rate is a tenth of the pretraining
-    one because those weights are already trained; a few hundred steps is usually enough.
-    Nothing here touches the supernet, so other subnets stay unaffected.
+    导出的模型从共享超网的切片权重起步，所以它的初始分数就等于它在超网内的分数。
+    学习率取预训练的十分之一，因为这些权重已经被训练过；几百步通常足够。
+    整个过程不碰超网，因此其它子网完全不受影响。
     """
     model = supernet.export_subnet(spec).to(getattr(task, "device", "cpu"))
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
@@ -131,7 +128,7 @@ def fine_tune_subnet(
 
 
 def kendall_tau(supernet_scores: list[float], standalone_scores: list[float]) -> float:
-    """Kendall tau-a over all pairs; ties inside a pair count as neither."""
+    """所有两两组合上的 Kendall τ-a；某一对内打平则既不算同序也不算反序。"""
     concordant = 0
     discordant = 0
     count = len(supernet_scores)
@@ -151,7 +148,7 @@ def kendall_tau(supernet_scores: list[float], standalone_scores: list[float]) ->
 
 
 def spearman_rho(supernet_scores: list[float], standalone_scores: list[float]) -> float:
-    """Pearson correlation of average ranks; ties share the average rank."""
+    """平均秩上的 Pearson 相关；打平的名次共享平均秩。"""
     left = _average_ranks(supernet_scores)
     right = _average_ranks(standalone_scores)
     mean_left = sum(left) / len(left)
@@ -180,7 +177,7 @@ def _average_ranks(values: list[float]) -> list[float]:
 
 
 def _rank_positions(values: list[float]) -> list[int]:
-    """1-based ranks with 1 = lowest loss = best."""
+    """从 1 开始的排名，1 表示损失最低（最好）。"""
     order = sorted(range(len(values)), key=lambda index: values[index])
     ranks = [0] * len(values)
     for rank, index in enumerate(order, start=1):
@@ -197,10 +194,10 @@ def run_ranking_experiment(
     deadline: float | None = None,
     min_candidates: int = 3,
 ) -> dict[str, object]:
-    """Compare the supernet's ordering of subnets with from-scratch training.
+    """比较"超网内排序"与"从零独立训练排序"。
 
-    deadline is an absolute time.monotonic() value: candidates are trained while time
-    remains, but never fewer than min_candidates so the correlation stays defined.
+    deadline 是一个绝对时间（time.monotonic()）：只要还有时间就继续训练下一个候选，
+    但至少完成 min_candidates 个，保证相关系数仍有定义。
     """
     rng = random.Random(config.seed)
     candidates = [space.sample(rng) for _ in range(config.num_candidates)]

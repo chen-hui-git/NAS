@@ -1,19 +1,17 @@
-"""The sandwich-rule training loop.
+"""三明治规则的训练循环。
 
-Each step trains four subnets and sums their losses into one optimizer step:
+每一步训练四个子网，把它们的损失求和后只做一次 optimizer step：
 
-    max     the most expensive subnet (deepest, widest, largest kernel/expansion)
-    min     the cheapest subnet
-    random  n_random uniformly sampled subnets
+    max     最贵的子网（最深、最宽、最大卷积核/扩张）
+    min     最便宜的子网
+    random  n_random 个均匀采样的子网
 
-Rationale (slimmable networks, refined by Once-for-All): the max subnet is usually the
-best performing one, the min subnet keeps the shared weights honest at the low end, and
-the random legs bring coverage; every subnet also acts as an in-place distillation target
-for the others, because they all update the same weights.
+动机（slimmable networks 提出，Once-for-All 沿用）：max 子网通常性能最好，min 子网让共享权重
+在低端也保持诚实，随机腿负责覆盖中间地带；同时因为四者更新的是同一套权重，每个子网都在充当
+其它子网的 in-place distillation 目标。
 
-shrink_stages > 1 switches on progressive shrinking (OFA): the sandwich starts with the
-largest configuration only, and smaller depths/widths/kernels join stage by stage until
-the full space is unlocked in the last stage.
+shrink_stages > 1 会开启渐进收缩（OFA 的做法）：三明治从"只有最大配置"开始，更小的深度/宽度/
+卷积核逐阶段加入，直到最后一个阶段解锁完整空间。
 """
 
 from __future__ import annotations
@@ -48,7 +46,7 @@ class SandwichConfig:
 
 @dataclass
 class SandwichStats:
-    """Coverage evidence: which parts of the space actually received gradients."""
+    """覆盖证据：空间里哪些部分真的拿到了梯度。"""
 
     steps: int = 0
     subnets_trained: int = 0
@@ -104,7 +102,7 @@ class StepRecord:
 
 
 class SandwichTrainer:
-    """Trains one Supernet by sampling a sandwich of subnets on every step."""
+    """每步采样一个三明治来训练同一个超网。"""
 
     def __init__(
         self,
@@ -128,7 +126,7 @@ class SandwichTrainer:
         self.schedule = build_shrink_schedule(self.space, self.config.shrink_stages)
 
     def current_stage(self) -> ShrinkStage | None:
-        """The unlocked frontier for the step about to run (None when shrink is off)."""
+        """即将执行的这一步所处的解锁前沿（未开启收缩时为 None）。"""
         if not self.schedule:
             return None
         progress = 1.0 if not self.total_steps else self.step_index / self.total_steps
@@ -136,7 +134,7 @@ class SandwichTrainer:
 
     # [snippet:sandwich-build]
     def build_sandwich(self) -> list[tuple[str, SubnetSpec, float]]:
-        """Return the (role, spec, loss_weight) legs of this step's sandwich."""
+        """返回这一步三明治的 (角色, spec, 损失权重) 各条腿。"""
         config = self.config
         stage = self.current_stage()
         space = self.space if stage is None else stage.space(self.space)
@@ -154,10 +152,10 @@ class SandwichTrainer:
     def leg_loss(
         self, logits: Tensor, labels: Tensor, teacher: Tensor | None
     ) -> Tensor:
-        """Cross-entropy, plus an optional KL term towards the max leg.
+        """交叉熵，外加一个可选的、指向 max 腿的 KL 项。
 
-        distill_weight = 0 (the default) returns plain cross-entropy, so a run without
-        distillation is exactly the sandwich rule with no extra machinery.
+        distill_weight = 0 时直接返回纯交叉熵，也就是说"不开蒸馏"的运行就是纯粹的
+        三明治规则，不带任何额外机制。
         """
         loss = classification_loss(logits, labels)
         weight = self.config.distill_weight
@@ -212,7 +210,7 @@ class SandwichTrainer:
         on_log: Callable[[StepRecord], None] | None = None,
         deadline: float | None = None,
     ) -> list[StepRecord]:
-        """Train at most steps times; stop early past an absolute time.monotonic() deadline."""
+        """最多训练 steps 步；超过 time.monotonic() 的绝对截止时间就提前停止。"""
         self.total_steps = self.step_index + steps
         history: list[StepRecord] = []
         for step in range(steps):

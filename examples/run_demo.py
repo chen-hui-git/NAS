@@ -1,18 +1,16 @@
 #!/usr/bin/env python3
-"""End-to-end supernet practice: train with the sandwich rule, then read the numbers off.
+"""端到端的超网实践：用三明治规则训练，然后把整族数字读出来。
 
-Task: MNIST digit classification, where each of the 28 image rows is one token. The run
-is organised around a wall-clock budget (default 300 s):
+任务：MNIST 数字分类，28 行图像各是一个 token。整轮运行以墙钟预算（默认 300 秒）为轴：
 
-    load data -> build supernet -> warm up and measure step time -> plan the number of
-    sandwich steps -> train -> evaluate the subnet family -> compare the supernet's
-    ranking with from-scratch training -> draw figures -> render the HTML report
+    加载数据 -> 构建超网 -> 热身测速 -> 规划三明治步数 -> 训练 -> 评估子网族 ->
+    与"从零独立训练"对比排序 -> 出图 -> 渲染 HTML 报告
 
-Run it with the interpreter that has torch installed, e.g.
+用法（用装了 torch 的解释器）：
 
     PYTHONPATH=. ../.venv/bin/python examples/run_demo.py
 
-Fast mode (about a minute):
+快速模式（约一分钟）：
 
     PYTHONPATH=. ../.venv/bin/python examples/run_demo.py --budget 60 --steps 300 --candidates 4
 """
@@ -54,11 +52,10 @@ LOGGER = logging.getLogger("supernet")
 
 
 def configure_logging(level: str) -> None:
-    """Route the run's progress through logging.
+    """把运行进度交给 logging 输出。
 
-    The format keeps the column layout of the CLI output; the level is still the usual
-    filter, so --log-level WARNING silences the progress lines and DEBUG is available for
-    library-level diagnostics.
+    格式化串保持命令行原有的分栏排版；日志级别仍是常规过滤器，
+    所以 --log-level WARNING 会静默进度行，DEBUG 则留给库内部诊断。
     """
     logging.basicConfig(
         level=getattr(logging, level.upper(), logging.INFO),
@@ -120,15 +117,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def git_state() -> str:
-    """Short HEAD hash (+dirty when the worktree differs), so a report ties to real code."""
+    """返回短 HEAD 哈希（工作区有改动时带 dirty 标记），让报告能对应到真实代码。"""
     root = Path(__file__).resolve().parents[1]
     try:
         commit = subprocess.check_output(
             ["git", "rev-parse", "--short", "HEAD"],
             cwd=root, stderr=subprocess.DEVNULL, text=True,
         ).strip()
-        # Only source files count: a run rewrites report/ artifacts, and those should
-        # not make the code look modified.
+        # 只看源码文件：每次运行都会重写 report/ 下的产物，那些不应该让代码显得被改动过。
         dirty = subprocess.check_output(
             ["git", "status", "--porcelain", "--",
              "supernet", "tests", "examples", "docs", "README.md", ".gitignore"],
@@ -140,7 +136,7 @@ def git_state() -> str:
 
 
 def resolve_device(requested: str) -> str:
-    """Pick the fastest available device; mps is Apple GPU, cpu is the safe default."""
+    """选出最快的可用设备；mps 是 Apple GPU，cpu 是稳妥的默认值。"""
     if requested == "auto":
         return "mps" if torch.backends.mps.is_available() else "cpu"
     if requested == "mps" and not torch.backends.mps.is_available():
@@ -149,7 +145,7 @@ def resolve_device(requested: str) -> str:
 
 
 def count_architectures(space: SearchSpace) -> int:
-    """Exact number of distinct specs admitted by the space."""
+    """该空间能容纳的不同 spec 的确切数量。"""
     choices = len(space.ffn_ratios) * len(space.ffn_kernels) * len(space.activations)
     pairs = len(space.valid_dim_pairs())
     return sum(
@@ -166,7 +162,7 @@ def head_dim_for(space: SearchSpace, embed_dim: int) -> int:
 
 
 def quality_spec(space: SearchSpace, depth: int, embed_dim: int) -> SubnetSpec:
-    """Fix the quality-maximising block choice; vary only depth or width."""
+    """固定"质量最高"的 block 选择，只让深度或宽度变化。"""
     layer = LayerChoice(max(space.ffn_ratios), max(space.ffn_kernels), space.activations[0])
     return SubnetSpec(
         depth=depth,
@@ -199,15 +195,14 @@ def main(argv: list[str] | None = None) -> int:
             deterministic = True
         except Exception as error:  # backend refused: keep going, but record it
             LOGGER.warning("deterministic algorithms unavailable (%s)", error)
-    # Measured on an M5 Pro: batch 64 and 128 cost almost the same per step
-    # (100 vs 134 ms) while 128 carries twice the images, so 128 is the better default.
+    # 在 M5 Pro 上实测：batch 64 与 128 的单步耗时几乎相同（100 vs 134 ms），
+    # 但 128 每步喂两倍图片，所以默认取 128。
     batch_size = args.batch_size if args.batch_size is not None else (
         128 if device == "mps" else 8
     )
     args.batch_size = batch_size
     if args.standalone_steps is None:
-        # The audit compares candidates under an equal training budget, so keep the
-        # *image* budget fixed and let the step count follow the batch size.
+        # 审计是在"相同训练预算"下比较候选，所以固定的是**图片数**预算，步数随 batch 反推。
         audit_images = 16000
         args.standalone_steps = max(20, round(audit_images / batch_size))
     LOGGER.info("=" * 68)
@@ -221,7 +216,7 @@ def main(argv: list[str] | None = None) -> int:
         f"{'（关闭）' if args.distill_weight <= 0 else ''}")
     LOGGER.info("=" * 68)
 
-    # ---------------------------------------------------------------- data
+    # ---------------------------------------------------------------- 数据
     phase = time.monotonic()
     LOGGER.info("\n[1/7] 加载数据")
     task = make_task(args.dataset, verbose=True, device=device)
@@ -231,7 +226,7 @@ def main(argv: list[str] | None = None) -> int:
         if key not in {"name", "num_classes", "input_features", "seq_len"}:
             LOGGER.info(f"      {key} = {value}")
 
-    # --------------------------------------------------------------- model
+    # --------------------------------------------------------------- 模型
     phase = time.monotonic()
     LOGGER.info("\n[2/7] 构建超网")
     space = SearchSpace(
@@ -262,15 +257,14 @@ def main(argv: list[str] | None = None) -> int:
     LOGGER.info(f"      一份权重供应        : {supernet_params / max_params:.1f}x 于最大子网 "
         f"({mark('model', phase):.2f}s)")
 
-    # --------------------------------------------------- warm up and plan
+    # --------------------------------------------------- 热身测速与步数规划
     phase = time.monotonic()
     LOGGER.info("\n[3/7] 热身测速，规划步数")
     batch_fn = task.batch_fn(args.batch_size, seed=args.seed)
     warmup_steps = 5
     timed_steps = 5
-    # Warm-up steps are thrown away on purpose: the first steps on mps pay kernel
-    # compilation, and averaging them in makes the planner believe every step costs
-    # ~20x what it really does.
+    # 热身步是故意丢弃的：mps 上最初几步要付 kernel 编译成本，
+    # 把它们算进平均值会让规划器误以为每步贵出约 20 倍。
     for step in range(warmup_steps):
         inputs, labels = batch_fn(step)
         trainer.train_step(inputs, labels)
@@ -284,8 +278,8 @@ def main(argv: list[str] | None = None) -> int:
     step_seconds = max(timings_per_step[len(timings_per_step) // 2], 1e-3)
     remaining = args.budget - (time.monotonic() - started)
     train_budget = max(remaining - args.report_reserve, remaining * 0.25) * args.train_share
-    # Progressive shrinking makes the first stages cost more per step: all four legs are
-    # the largest subnet (measured 1.75x). 1.4x is the stage-weighted average.
+    # 渐进收缩会让前几个阶段每步更贵：四条腿都是最大子网（实测 1.75 倍）。
+    # 这里取按阶段加权的平均值 1.4 倍作为估计。
     cost_factor = 1.4 if args.shrink_stages > 1 else 1.0
     planned = int(train_budget / (step_seconds * cost_factor))
     planned = max(args.min_steps, min(args.steps, planned))
@@ -295,7 +289,7 @@ def main(argv: list[str] | None = None) -> int:
     LOGGER.info(f"      计划训练步数        : {planned} "
         f"(~{planned * args.batch_size} 张图, ~{planned * step_seconds:.0f}s)")
 
-    # ------------------------------------------------------------ training
+    # ------------------------------------------------------------ 训练
     phase = time.monotonic()
     LOGGER.info("\n[4/7] 三明治训练")
     log_every = max(1, planned // 12)
@@ -329,7 +323,7 @@ def main(argv: list[str] | None = None) -> int:
     LOGGER.info(f"      训练完成            : {planned} 步 / "
         f"{planned * (1 + 1 + args.n_random)} 个子网次 ({train_seconds:.0f}s)")
 
-    # --------------------------------------------------------- evaluation
+    # --------------------------------------------------------- 评估子网族
     phase = time.monotonic()
     LOGGER.info("\n[5/7] 评估子网族（不再训练）")
     batches = task.fixed_batches(args.batch_size, args.eval_batches, seed=args.seed + 101)
@@ -374,8 +368,7 @@ def main(argv: list[str] | None = None) -> int:
         LOGGER.info(f"      width {row['embed_dim']:3d}  {row['parameters'] / 1e6:5.2f}M  "
             f"loss={row['loss']:.3f}  acc={row['accuracy']:.3f}")
 
-    # A fixed generator instead of the global random module: this row and the example
-    # spec must be reproducible from --seed alone.
+    # 用固定 generator 而不是全局 random 模块：这一行和示例 spec 都必须只靠 --seed 就能复现。
     intermediate = space.sample(random.Random(args.seed + 7))
     example_spec = intermediate.to_dict()
     eval_rows = [
@@ -402,7 +395,7 @@ def main(argv: list[str] | None = None) -> int:
         },
     ]
 
-    # ---- exported-subnet fine-tuning: how much does the slice approximation cost?
+    # ---- 导出子网微调：切片这个近似到底要付多少代价？
     fine_tune_rows = []
     if args.fine_tune_steps > 0:
         LOGGER.info(f"\n      微调导出子网（各 {args.fine_tune_steps} 步，lr=3e-4）")
@@ -442,7 +435,7 @@ def main(argv: list[str] | None = None) -> int:
     LOGGER.info(f"      min     : {predictions['min']}")
     mark("eval", phase)
 
-    # ------------------------------------------------------------- ranking
+    # ------------------------------------------------------------- 排序审计
     phase = time.monotonic()
     LOGGER.info("\n[6/7] 超网内排序 vs 独立训练排序")
     ranking_config = RankingExperimentConfig(
@@ -469,7 +462,7 @@ def main(argv: list[str] | None = None) -> int:
         f"regret = {ranking['regret']:+.3f}")
     mark("ranking", phase)
 
-    # ---------------------------------------------------- figures + report
+    # ---------------------------------------------------- 出图与报告
     phase = time.monotonic()
     figure_paths = {}
     if not args.no_figures:
@@ -587,7 +580,7 @@ def main(argv: list[str] | None = None) -> int:
         report_path = build_report(context, out_dir / "supernet_demo.html")
         mark("report", phase)
 
-    # ------------------------------------------------------------ summary
+    # ------------------------------------------------------------ 汇总
     LOGGER.info("\n" + "=" * 68)
     LOGGER.info("结果")
     LOGGER.info("=" * 68)

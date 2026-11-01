@@ -1,9 +1,8 @@
-"""MNIST handwritten digits: the canonical small vision dataset.
+"""MNIST 手写数字：最经典的小型视觉数据集。
 
-The four IDX files are the original LeCun MNIST distribution. Each download is checked
-twice -- gzip + IDX header/body length (catches truncation, the usual failure) and a
-recorded SHA-256 -- then cached, so the download happens once and later runs work offline.
-Use --dataset bars for a purely synthetic fallback.
+四个 IDX 文件就是 LeCun 的原始 MNIST 发行版。每次下载都会做两重校验：
+gzip 解压 + IDX 头/体长度（专门抓"下载被截断"这种最常见的坏法），以及记录在案的 SHA-256；
+随后缓存到本地，所以只下载一次，之后离线也能跑。无网络时可用 --dataset bars 走纯合成回退。
 """
 
 from __future__ import annotations
@@ -27,7 +26,7 @@ MNIST_MIRRORS = (
 DEFAULT_DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 LOGGER = logging.getLogger(__name__)
 
-# name -> (expected decompressed file name, expected gzipped size, expected sha256)
+# 文件名 -> (期望的 gzip 大小, 期望的 sha256)
 MNIST_FILES: dict[str, tuple[int, str]] = {
     "train-images-idx3-ubyte.gz": (9912422, "440fcabf73cc546fa21475e81ea370265605f56be210a4024d2ca8f203523609"),
     "train-labels-idx1-ubyte.gz": (28881, "3552534a0a558bbed6aed32b30c495cca23d567ec52cac8be1a0730e8010255c"),
@@ -45,7 +44,7 @@ def _sha256(path: Path) -> str:
 
 
 def _decode(name: str, payload: bytes) -> bytes:
-    """Validate an IDX file structurally; returns the decompressed bytes."""
+    """对 IDX 文件做结构校验；返回解压后的字节。"""
     raw = gzip.decompress(payload)
     if "images" in name:
         magic, count, rows, cols = struct.unpack(">IIII", raw[:16])
@@ -76,7 +75,7 @@ def ensure_mnist(
     mirrors: tuple[str, ...] = MNIST_MIRRORS,
     verbose: bool = True,
 ) -> Path:
-    """Return the local MNIST directory, downloading and validating what is missing."""
+    """返回本地 MNIST 目录，缺什么就下载并校验什么。"""
     root = Path(data_dir) if data_dir is not None else DEFAULT_DATA_DIR
     root.mkdir(parents=True, exist_ok=True)
     for name, (size, expected_sha) in MNIST_FILES.items():
@@ -121,7 +120,7 @@ def _read_labels(path: Path) -> Tensor:
 
 
 class MNISTTask(Task):
-    """MNIST digit classification, one image row per token."""
+    """MNIST 数字分类：图像的一行就是一个 token。"""
 
     name = "mnist"
 
@@ -168,7 +167,7 @@ class MNISTTask(Task):
         return batches
 
     def preview(self) -> tuple[Tensor, Tensor]:
-        """One test image per class, for the qualitative figure."""
+        """每个类别取一张测试图，用于定性对照的插图。"""
         chosen = []
         for label in range(self.num_classes):
             index = int((self.test_labels == label).nonzero()[0])
