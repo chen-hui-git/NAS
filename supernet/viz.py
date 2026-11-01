@@ -57,83 +57,132 @@ def _save(fig, path: Path) -> Path:
     return path
 
 
-def plot_slicing_schematic(path: Path) -> Path:
-    """Show that a subnet is a leading-channel slice of one shared tensor."""
-    _style()
-    fig, (left, right) = plt.subplots(1, 2, figsize=(9.4, 4.0))
+def _cell_size(max_dim: int, dim: int, max_cells: int = 16) -> int:
+    """Largest divisor shared by both widths that still gives a readable grid."""
+    common = [c for c in range(1, min(max_dim, dim) + 1) if max_dim % c == 0 and dim % c == 0]
+    usable = [c for c in common if max_dim // c <= max_cells]
+    return min(usable) if usable else max(common)
 
-    total = 8
-    used = 5
-    for row in range(total):
-        for column in range(total):
-            active = row < used and column < used
+
+def plot_slicing_schematic(
+    spec: dict,
+    path: Path,
+    *,
+    max_embed_dim: int,
+    ffn_ratios: tuple[int, ...],
+    ffn_kernels: tuple[int, ...],
+) -> Path:
+    """Draw the exact slice one concrete subnet takes, straight from its spec.
+
+    Nothing here is a placeholder: the grid scale comes from max_embed_dim and the
+    subnet width, and the per-layer matrix shows the branch each layer actually chose.
+    """
+    _style()
+    embed_dim = int(spec["embed_dim"])
+    head_dim = int(spec["head_dim"])
+    layers = spec["layers"]
+    depth = len(layers)
+
+    cell = _cell_size(max_embed_dim, embed_dim)
+    cells_max = max_embed_dim // cell
+    cells_sub = embed_dim // cell
+
+    fig, (left, right) = plt.subplots(
+        1, 2, figsize=(10.4, max(4.0, 0.42 * depth + 1.6)),
+        gridspec_kw={"width_ratios": [1.05, 1.35]},
+    )
+
+    # ---- left: the shared weight tensor and the block this subnet uses
+    for row in range(cells_max):
+        for column in range(cells_max):
+            active = row < cells_sub and column < cells_sub
             left.add_patch(
                 Rectangle(
-                    (column, total - row - 1),
+                    (column, cells_max - row - 1),
                     1,
                     1,
                     facecolor="#4c7bd9" if active else "#eef1f6",
-                    edgecolor="#c9d2e0" if not active else "#2b5bb0",
-                    linewidth=0.7,
+                    edgecolor="#2b5bb0" if active else "#c9d2e0",
+                    linewidth=0.5,
                 )
             )
     left.add_patch(
-        Rectangle((0, total - used), used, used, fill=False, edgecolor=MAX_COLOR, linewidth=2.4)
+        Rectangle((0, cells_max - cells_sub), cells_sub, cells_sub, fill=False,
+                  edgecolor=MAX_COLOR, linewidth=2.2)
     )
-    left.set_xlim(0, total)
-    left.set_ylim(0, total)
+    left.add_patch(
+        Rectangle((0, 0), cells_max, cells_max, fill=False, edgecolor=INK,
+                  linewidth=1.0, linestyle="--")
+    )
+    left.set_xlim(-0.2, cells_max + 0.2)
+    left.set_ylim(-0.2, cells_max + 1.6)
     left.set_xticks([])
     left.set_yticks([])
     left.grid(False)
-    left.set_xlabel("input channels (widest = 128)")
+    left.set_aspect("equal")
+    left.set_xlabel(f"input channels  (1 cell = {cell})")
     left.set_ylabel("output channels")
-    left.set_title("One shared weight tensor:\nthe subnet takes the leading block")
-    left.annotate(
-        "max subnet\nuses everything",
-        xy=(total - 0.4, total - 0.5),
-        ha="right",
-        va="top",
-        color=MUTED,
-        fontsize=8,
+    left.set_title(
+        f"Shared weight tensor, widest = {max_embed_dim}\n"
+        f"this subnet uses the leading {cells_sub}/{cells_max} = {embed_dim} channels"
     )
     left.annotate(
-        "narrow subnet\nuses only this block",
-        xy=(used + 0.15, total - used + 0.2),
-        xytext=(used + 1.4, 1.2),
-        color=MAX_COLOR,
-        fontsize=8.5,
-        arrowprops={"arrowstyle": "->", "color": MAX_COLOR, "lw": 1.2},
+        f"{embed_dim} ch used",
+        xy=(cells_sub / 2, cells_max - cells_sub / 2),
+        ha="center",
+        va="center",
+        fontsize=9,
+        color="white",
+        fontweight="bold",
     )
-
-    branches = ["r2k1", "r2k3", "r2k5", "r3k1", "r3k3", "r3k5", "r4k1", "r4k3", "r4k5"]
-    chosen = "r3k3"
-    for index, name in enumerate(branches):
-        active = name == chosen
-        right.add_patch(
-            Rectangle(
-                (0, index),
-                3.0,
-                0.8,
-                facecolor=RANDOM_COLOR if active else "#eef1f6",
-                edgecolor=RANDOM_COLOR if active else "#c9d2e0",
-                linewidth=1.2 if active else 0.7,
-            )
+    if cells_max > cells_sub:
+        left.annotate(
+            f"{max_embed_dim - embed_dim} ch unused\n(belong to wider subnets)",
+            xy=(cells_sub + (cells_max - cells_sub) / 2, cells_max - cells_sub / 2),
+            ha="center",
+            va="center",
+            fontsize=8,
+            color=MUTED,
         )
-        right.text(0.15, index + 0.4, f"conv1d branch {name}", va="center", fontsize=8,
-                   color="white" if active else INK)
-    right.set_xlim(0, 5.4)
-    right.set_ylim(-0.2, len(branches) + 0.2)
-    right.set_xticks([])
-    right.set_yticks([])
-    right.grid(False)
-    right.set_title("Per-block FFN: every branch exists,\nthe subnet activates exactly one")
-    right.annotate(
-        "chosen by the sampled\narchitecture spec",
-        xy=(3.0, branches.index(chosen) + 0.4),
-        xytext=(3.4, branches.index(chosen) + 3.0),
-        fontsize=8.5,
-        color=RANDOM_COLOR,
-        arrowprops={"arrowstyle": "->", "color": RANDOM_COLOR, "lw": 1.2},
+
+    # ---- right: which FFN branch each layer picked
+    keys = [f"r{ratio}k{kernel}" for ratio in ffn_ratios for kernel in ffn_kernels]
+    for layer_index, layer in enumerate(layers):
+        chosen = f"r{int(layer['ffn_ratio'])}k{int(layer['ffn_kernel'])}"
+        for column, key in enumerate(keys):
+            active = key == chosen
+            right.add_patch(
+                Rectangle(
+                    (column + 0.06, depth - layer_index - 0.92),
+                    0.88,
+                    0.84,
+                    facecolor=RANDOM_COLOR if active else "#eef1f6",
+                    edgecolor=RANDOM_COLOR if active else "#c9d2e0",
+                    linewidth=1.0 if active else 0.5,
+                )
+            )
+            if active:
+                right.text(
+                    column + 0.5,
+                    depth - layer_index - 0.5,
+                    chosen,
+                    ha="center",
+                    va="center",
+                    fontsize=7,
+                    color="white",
+                    fontweight="bold",
+                )
+    right.set_xlim(0, len(keys))
+    right.set_ylim(-0.2, depth + 0.2)
+    right.set_xticks([column + 0.5 for column in range(len(keys))])
+    right.set_xticklabels(keys, rotation=45, ha="right", fontsize=7.5)
+    right.set_yticks([depth - index - 0.5 for index in range(depth)])
+    right.set_yticklabels([f"L{index}" for index in range(depth)], fontsize=7.5)
+    right.grid(axis="x", visible=False)
+    right.grid(axis="y", visible=False)
+    right.set_title(
+        f"Per-layer FFN choice of this subnet (depth {depth})\n"
+        f"{embed_dim} ch, head_dim {head_dim} -> {embed_dim // head_dim} heads"
     )
     fig.tight_layout()
     return _save(fig, path)

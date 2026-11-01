@@ -454,5 +454,44 @@ class ReportTests(unittest.TestCase):
             read_snippet("supernet/modules.py", "not-a-snippet")
 
 
+class SchematicFigureTests(unittest.TestCase):
+    """The slicing figure must come from the spec, not from placeholder numbers."""
+
+    def test_cell_size_keeps_the_grid_readable(self) -> None:
+        try:
+            from supernet.viz import _cell_size
+        except ImportError:
+            self.skipTest("matplotlib not installed")
+        self.assertEqual(_cell_size(128, 96), 8)
+        self.assertEqual(_cell_size(128, 128), 8)
+        self.assertEqual(_cell_size(96, 64), 8)
+
+    def test_schematic_is_rendered_from_the_spec(self) -> None:
+        try:
+            from supernet.viz import plot_slicing_schematic
+        except ImportError:
+            self.skipTest("matplotlib not installed")
+        import tempfile
+
+        spec = {
+            "embed_dim": 96,
+            "head_dim": 32,
+            "depth": 3,
+            "layers": [
+                {"ffn_ratio": 2, "ffn_kernel": 1, "activation": "gelu"},
+                {"ffn_ratio": 4, "ffn_kernel": 5, "activation": "silu"},
+                {"ffn_ratio": 3, "ffn_kernel": 3, "activation": "gelu"},
+            ],
+        }
+        with tempfile.TemporaryDirectory() as folder:
+            out = Path(folder) / "slicing.png"
+            path = plot_slicing_schematic(
+                spec, out, max_embed_dim=128,
+                ffn_ratios=(2, 3, 4), ffn_kernels=(1, 3, 5),
+            )
+            self.assertTrue(path.exists())
+            self.assertGreater(path.stat().st_size, 4000)
+
+
 if __name__ == "__main__":
     unittest.main()

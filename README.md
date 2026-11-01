@@ -44,7 +44,7 @@ Kendall τ ≈ 0.33。
 | 产物 | 说明 |
 | --- | --- |
 | `report/supernet_demo.html` | 中文教学报告（自包含，图片内嵌 base64，可直接发学生） |
-| `report/figures/*.png` | 6 张图：切片示意、三条腿损失+准确率、空间覆盖、子网族曲线、排序散点、逐张预测 |
+| `report/figures/*.png` | 6 张图：切片示意（**由示例 spec 真实画出**：共享张量用到的通道块 + 每层选中的 FFN 分支）、三条腿损失+准确率、空间覆盖、子网族曲线、排序散点、逐张预测 |
 | `report/metrics.json` | 本次运行的全部数字（空间、参数、准确率、排序相关性、耗时明细） |
 | `report/sandwich_log.jsonl` | 每一步四条腿的 loss / acc 与对应 arch_id，可逐行复现/画图 |
 

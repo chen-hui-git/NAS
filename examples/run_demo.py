@@ -286,6 +286,7 @@ def main(argv: list[str] | None = None) -> int:
             f"loss={row['loss']:.3f}  acc={row['accuracy']:.3f}")
 
     intermediate = space.sample()
+    example_spec = intermediate.to_dict()
     eval_rows = [
         {
             "label": "max",
@@ -357,7 +358,13 @@ def main(argv: list[str] | None = None) -> int:
         from supernet import viz
 
         figure_paths = {
-            "slicing": viz.plot_slicing_schematic(figures_dir / "slicing.png"),
+            "slicing": viz.plot_slicing_schematic(
+                example_spec,
+                figures_dir / "slicing.png",
+                max_embed_dim=space.max_embed_dim,
+                ffn_ratios=space.ffn_ratios,
+                ffn_kernels=space.ffn_kernels,
+            ),
             "sandwich": viz.plot_sandwich_curves(
                 history, figures_dir / "sandwich_curves.png", chance_loss
             ),
@@ -411,7 +418,7 @@ def main(argv: list[str] | None = None) -> int:
             "true": preview_labels.tolist(),
             **predictions,
         },
-        "example_spec": intermediate.to_dict(),
+        "example_spec": example_spec,
     }
     metrics_path = out_dir / "metrics.json"
     metrics_path.write_text(json.dumps(metrics, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -433,7 +440,7 @@ def main(argv: list[str] | None = None) -> int:
             "ranking": ranking,
             "predictions": metrics["predictions"],
             "figures": figure_paths,
-            "example_spec": json.dumps(intermediate.to_dict(), indent=2, ensure_ascii=False),
+            "example_spec": json.dumps(example_spec, indent=2, ensure_ascii=False),
         }
         report_path = build_report(context, out_dir / "supernet_demo.html")
         mark("report", phase)

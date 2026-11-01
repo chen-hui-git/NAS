@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 from datetime import datetime
 import html
+import json
 from pathlib import Path
 import re
 import textwrap
@@ -302,6 +303,18 @@ def build_report(context: dict, out_path: Path) -> Path:
     depth_counts = ", ".join(f"{key}: {value}" for key, value in stats["depth_counts"].items())
     kernel_counts = ", ".join(f"{key}: {value}" for key, value in stats["kernel_counts"].items())
 
+    try:
+        example_dict = json.loads(context["example_spec"])
+    except (KeyError, TypeError, ValueError):
+        example_dict = {}
+    example_dim = int(example_dict.get("embed_dim") or 0)
+    example_depth = int(example_dict.get("depth") or 0)
+    slicing_caption = (
+        "左：共享权重张量，每格代表若干通道（格数与子网宽度严格对应），粗框是"
+        f"这个子网实际用到的前 {example_dim} 个通道，虚线框是最宽子网的边界；"
+        f"右：它 {example_depth} 层各自选中的 FFN 分支——同一份规格里每层可以选不同分支。"
+    )
+
     dataset = run["dataset"]
     toc = "".join(
         f'<a href="#{anchor}">{title}</a>'
@@ -402,7 +415,7 @@ def build_report(context: dict, out_path: Path) -> Path:
            "固定：每行像素是一个 token，所有子网共享同一输入输出形状"],
       ],
   )}
-  <p>一个具体的子网长这样（本次运行里随机抽到的一个）：</p>
+  <p>一个具体的子网长这样（本次运行里随机抽到的一个候选子网；第 3 节的示意图画的就是它）：</p>
 <pre class="ascii">{html.escape(context["example_spec"])}</pre>
   <h3>每一层那三个字段到底是什么意思</h3>
   <p>逐层可搜索的只有三项，其余都是全局或写死的。一个 block 的实际计算是：</p>
@@ -440,7 +453,7 @@ x = x + conv1d_k( LayerNorm(x) , out = dim x ratio )    ← kernel、ratio 来�
 <section id="share">
   <h2>3 权重共享与切片<span class="tag">核心技巧</span></h2>
   <p>切片只发生在 <code class="inline">forward</code> 里几行：权重按最大宽度分配，子网取前 <code class="inline">out_channels × in_channels</code> 那块。同一份参数因此同时服务宽子网和窄子网。</p>
-  {_figure(figures, "slicing", "左：一个共享卷积核矩阵，窄子网只用左上角的块；右：每层并列的 FFN 分支，子网只激活一支。")}
+  {_figure(figures, "slicing", slicing_caption)}
   {_code("supernet/modules.py", "elastic-conv")}
   <p>FFN 的分支选择同样只是一个字典查找：</p>
   {_code("supernet/modules.py", "elastic-ffn")}

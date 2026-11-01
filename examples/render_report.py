@@ -51,6 +51,23 @@ def main(argv: list[str] | None = None) -> int:
     example_spec = metrics.get("example_spec")
     if example_spec is None:
         example_spec = metrics["ranking"]["candidates"][0]["spec"]
+        source = "ranking candidate (metrics.json has no example_spec)"
+    else:
+        source = "metrics.json example_spec"
+
+    # Redraw the schematic from the very spec the text shows, so figure and text can
+    # never disagree even when metrics.json came from an older run.
+    space_meta = metrics["run"]["space"]
+    from supernet import viz
+
+    viz.plot_slicing_schematic(
+        example_spec,
+        figure_dir / FIGURE_FILES["slicing"],
+        max_embed_dim=max(space_meta["embed_dims"]),
+        ffn_ratios=tuple(space_meta["ffn_ratios"]),
+        ffn_kernels=tuple(space_meta["ffn_kernels"]),
+    )
+    print(f"schematic redrawn from {source}: {example_spec.get('arch_id', '?')}")
 
     context = {
         "run": metrics["run"],
