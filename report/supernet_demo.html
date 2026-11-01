@@ -96,7 +96,7 @@ a { color: var(--accent); }
   <div class="cards"><div class="card"><div class="card-label">超网参数</div><div class="card-value">18.42M</div><div class="card-hint">一份权重，全部子网共享</div></div><div class="card"><div class="card-label">最大子网</div><div class="card-value">4.61M</div><div class="card-hint">depth 10 / width 128</div></div><div class="card"><div class="card-label">最小子网</div><div class="card-value">0.14M</div><div class="card-hint">depth 4 / width 64</div></div><div class="card"><div class="card-label">权重共享比</div><div class="card-value">4x</div><div class="card-hint">超网 / 最大子网 参数量</div></div><div class="card"><div class="card-label">本次训练步数</div><div class="card-value">1058</div><div class="card-hint">126 ms/步 · 每步 4 个子网</div></div><div class="card"><div class="card-label">max 子网准确率</div><div class="card-value">97.7%</div><div class="card-hint">min 子网 95.7% / 随机猜 10%</div></div><div class="card"><div class="card-label">排序一致性 τ</div><div class="card-value">0.24</div><div class="card-hint">超网内排序 vs 独立训练排序</div></div></div>
 </header>
 
-<div class="toc"><b>目录</b><a href="#what">1 什么是超网</a><a href="#space">2 弹性搜索空间</a><a href="#share">3 权重共享与切片</a><a href="#sandwich">4 三明治规则</a><a href="#family">5 一次训练一个族</a><a href="#trap">6 陷阱：排序不一致</a><a href="#budget">7 预算记账</a><a href="#run">8 复现与文件结构</a><a href="#exercises">9 自己动手</a><a href="#refs">10 参考文献</a></div>
+<div class="toc"><b>目录</b><a href="#what">1 什么是超网</a><a href="#space">2 弹性搜索空间</a><a href="#share">3 权重共享与切片</a><a href="#sandwich">4 三明治规则</a><a href="#family">5 一次训练一个族</a><a href="#trap">6 陷阱：排序不一致</a><a href="#budget">7 预算记账</a><a href="#run">8 复现与文件结构</a><a href="#exercises">9 可复现的实验</a><a href="#scope">10 适用范围</a><a href="#refs">11 参考文献</a></div>
 
 <section id="what">
   <h2>1 什么是超网<span class="tag">直觉</span></h2>
@@ -483,8 +483,18 @@ tests/test_supernet.py 35 个回归测试</pre>
   这比任何文字都更能说明：<b>超网分数是代理，不是结论</b>。</div>
 </section>
 
+<section id="scope">
+  <h2>10 适用范围<span class="tag">边界</span></h2>
+  <h3>适用范围：哪些结论能带走，哪些不能</h3>
+  <p>本页所有数字都来自<b>一个模型族 + 一个数据集 + 一个训练预算</b>。把结论搬走之前，请先分清两类：</p>
+  <table><thead><tr><th>结论</th><th>类型</th><th>换设置后还成立吗</th></tr></thead><tbody><tr><td>超网 &gt; 最大子网，差额 = 每层未被选中的分支</td><td>结构性（纯算术）</td><td>✅ 成立，只是数字变</td></tr><tr><td>通道可切片、卷积核不可切片</td><td>结构性（前缀语义）</td><td>✅ 方向成立，掉点多少会变</td></tr><tr><td>宽度/深度必须全局一致，FFN 分支可逐层不同</td><td>结构性（代码约束）</td><td>✅ 成立</td></tr><tr><td>导出子网 zero-shot == 超网内分数</td><td>实现性质（LayerNorm）</td><td>⚠️ 换成 BatchNorm 就不成立</td></tr><tr><td>深度扫描几乎平、宽度阶梯单调</td><td>经验性（任务难度）</td><td>❌ 需重测；更难任务上深度可能有明显收益</td></tr><tr><td>τ ≈ {_fmt(ranking['kendall_tau'], 2)}、recall@3 = {recall_rows[1][1] if len(recall_rows) > 1 else '—'}</td><td>经验性（训练量）</td><td>❌ 需重测；步数不足时曾测到 τ 变负</td></tr><tr><td>KD 让小子网涨点、微调收益在 KD 之后变小</td><td>经验性（欠训程度）</td><td>⚠️ 方向大致成立，幅度需重测</td></tr><tr><td>渐进收缩在小预算下更差</td><td>经验性（预算规模）</td><td>⚠️ 大预算时可能反超</td></tr></tbody></table>
+  <div class="note">必须重测的三件事：<b>①</b> 深度/宽度扫描曲线（判断该任务缺深度还是缺宽度）；
+  <b>②</b> τ 与 recall@k（超网分数还能不能当筛选器）；<b>③</b> PS 与 KD 的收益方向。
+  其余（参数分解、切片机制、覆盖形状、zero-shot 等价、记账口径）可以直接沿用。</div>
+</section>
+
 <section id="refs">
-  <h2>10 参考文献<span class="tag">出处</span></h2>
+  <h2>11 参考文献<span class="tag">出处</span></h2>
   <ul>
     <li>Bender et al. <i>Understanding and Simplifying One-Shot Architecture Search</i>. <a href="https://arxiv.org/abs/1802.01548">arXiv:1802.01548</a></li>
     <li>Pham et al. <i>Efficient Neural Architecture Search via Parameter Sharing</i>. <a href="https://arxiv.org/abs/1802.03268">arXiv:1802.03268</a></li>
@@ -500,7 +510,7 @@ tests/test_supernet.py 35 个回归测试</pre>
 </section>
 
 <footer>
-  由 <code class="inline">examples/run_demo.py</code> 自动生成 · 2026-11-01 17:51:08 ·
+  由 <code class="inline">examples/run_demo.py</code> 自动生成 · 2026-11-01 18:06:59 ·
   图中标签使用英文，因为 matplotlib 默认字体没有中文字形。
 </footer>
 
