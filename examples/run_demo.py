@@ -83,7 +83,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--deterministic", action="store_true",
                         help="ask torch for deterministic kernels (cpu: usually fine, mps: may refuse)")
     parser.add_argument("--shrink-stages", type=int, default=0,
-                        help="progressive shrinking stages; 0 = off (joint training), 4 = OFA style")
+                        help="progressive shrinking stages; 0 = off (joint training). "
+                             "N = N equal-length segments unlocking ALL dims at once; "
+                             "OFA's own scheme is 5 stages, one dimension at a time "
+                             "(see docs/ofa_gap.md)")
     parser.add_argument("--distill-weight", type=float, default=0.5,
                         help="KL weight towards the max leg (in-place distillation); "
                              "0 = off. 0.5 is the measured default: same wall clock, "

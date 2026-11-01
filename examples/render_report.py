@@ -18,7 +18,6 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from supernet import SearchSpace, parameter_breakdown
-from supernet import SearchSpace, parameter_breakdown
 from supernet.report import build_report
 
 LOGGER = logging.getLogger("supernet")

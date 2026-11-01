@@ -3,8 +3,6 @@ __pycache__/
 .venv/
 data/
 report/figures/
-report/sandwich_log.jsonl
-report/run.log
 .mplcache/
 .idea/
 .tools/
