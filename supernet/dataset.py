@@ -1,9 +1,9 @@
-"""MNIST handwritten digits: the classic teaching dataset.
+"""MNIST handwritten digits: the canonical small vision dataset.
 
 The four IDX files are the original LeCun MNIST distribution. Each download is checked
 twice -- gzip + IDX header/body length (catches truncation, the usual failure) and a
-recorded SHA-256 -- then cached, so a teaching session downloads once and works offline
-afterwards. Use --dataset bars for a purely synthetic fallback.
+recorded SHA-256 -- then cached, so the download happens once and later runs work offline.
+Use --dataset bars for a purely synthetic fallback.
 """
 
 from __future__ import annotations

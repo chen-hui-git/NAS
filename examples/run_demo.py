@@ -188,7 +188,7 @@ def main(argv: list[str] | None = None) -> int:
         audit_images = 16000
         args.standalone_steps = max(20, round(audit_images / batch_size))
     say("=" * 68)
-    say(f"超网 / 三明治采样教学 Demo    预算 {args.budget:.0f}s   数据集 {args.dataset}")
+    say(f"超网实践：三明治规则 + 子网族    预算 {args.budget:.0f}s   数据集 {args.dataset}")
     say(f"设备 {device}   batch {batch_size}   "
         f"审计: {args.candidates} 候选 x {args.standalone_steps} 步 "
         f"= {args.candidates * args.standalone_steps * batch_size:,} 图")
@@ -551,7 +551,7 @@ def main(argv: list[str] | None = None) -> int:
     if figure_paths:
         say(f"  图                  : {figures_dir}")
     if report_path is not None:
-        say(f"  教学报告 (HTML)     : {report_path}")
+        say(f"  报告 (HTML)         : {report_path}")
     say("")
 
     if args.open and report_path is not None:

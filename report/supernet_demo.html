@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>超网（Supernet）最小可运行教学实验</title>
+<title>超网（Supernet）实践：MNIST 上的权重共享 NAS</title>
 <style>
 :root {
   --ink: #16202b;
@@ -81,7 +81,7 @@ a { color: var(--accent); }
 
 <header class="hero">
   <h1>超网（Supernet）：一次训练，得到一个子网族</h1>
-  <p class="lead">最小可运行的权重共享 NAS 教学实验，训练规则用的是三明治采样（sandwich rule）。本页所有数字与图都来自这一次真实运行。</p>
+  <p class="lead">MNIST 手写数字上的权重共享 NAS 实践：一次训练得到一个子网族，训练规则是三明治采样（sandwich rule）。本页所有数字与图都来自这一次真实运行。</p>
   <div class="meta">
     <span class="pill">数据集 mnist</span>
     <span class="pill">输入 28×28</span>
@@ -96,7 +96,7 @@ a { color: var(--accent); }
   <div class="cards"><div class="card"><div class="card-label">超网参数</div><div class="card-value">18.42M</div><div class="card-hint">一份权重，全部子网共享</div></div><div class="card"><div class="card-label">最大子网</div><div class="card-value">4.61M</div><div class="card-hint">depth 10 / width 128</div></div><div class="card"><div class="card-label">最小子网</div><div class="card-value">0.14M</div><div class="card-hint">depth 4 / width 64</div></div><div class="card"><div class="card-label">权重共享比</div><div class="card-value">4x</div><div class="card-hint">超网 / 最大子网 参数量</div></div><div class="card"><div class="card-label">本次训练步数</div><div class="card-value">1249</div><div class="card-hint">119 ms/步 · 每步 4 个子网</div></div><div class="card"><div class="card-label">max 子网准确率</div><div class="card-value">98.8%</div><div class="card-hint">min 子网 96.2% / 随机猜 10%</div></div><div class="card"><div class="card-label">排序一致性 τ</div><div class="card-value">0.33</div><div class="card-hint">超网内排序 vs 独立训练排序</div></div></div>
 </header>
 
-<div class="toc"><b>目录</b><a href="#what">1 什么是超网</a><a href="#space">2 弹性搜索空间</a><a href="#share">3 权重共享与切片</a><a href="#sandwich">4 三明治规则</a><a href="#family">5 一次训练一个族</a><a href="#trap">6 陷阱：排序不一致</a><a href="#budget">7 预算记账</a><a href="#run">8 复现与教学安排</a><a href="#exercises">9 自己动手</a><a href="#refs">10 参考文献</a></div>
+<div class="toc"><b>目录</b><a href="#what">1 什么是超网</a><a href="#space">2 弹性搜索空间</a><a href="#share">3 权重共享与切片</a><a href="#sandwich">4 三明治规则</a><a href="#family">5 一次训练一个族</a><a href="#trap">6 陷阱：排序不一致</a><a href="#budget">7 预算记账</a><a href="#run">8 复现与文件结构</a><a href="#exercises">9 自己动手</a><a href="#refs">10 参考文献</a></div>
 
 <section id="what">
   <h2>1 什么是超网<span class="tag">直觉</span></h2>
@@ -335,7 +335,7 @@ x = x + conv1d_k( LayerNorm(x) , out = dim x ratio )    ← kernel、ratio 来�
     <li><b>右图怎么用？</b> 每一点都是一个“可直接部署”的配置：横轴是成本（参数量），纵轴是质量。
     选模型就是在左上角找点——这就是超网真正交付的东西：<b>一条成本-质量曲线，而不是一个架构</b>。</li>
     <li><b>注意非单调。</b> 宽度扫描里更宽的子网偶尔更差（本次 w96 就低于 w64），
-    这不是 bug，而是“训练不均衡 + 评测噪声”的体现，值得让学生自己找反例。</li>
+    这不是 bug，而是“训练不均衡 + 评测噪声”的体现，值得自己去找反例。</li>
   </ul>
   <h3>深度扫描明细</h3>
   <table><thead><tr><th>depth</th><th>参数量</th><th>验证损失</th><th>验证准确率</th></tr></thead><tbody><tr><td>4</td><td>1.85M</td><td>0.067</td><td>98.5%</td></tr><tr><td>5</td><td>2.31M</td><td>0.056</td><td>98.6%</td></tr><tr><td>6</td><td>2.77M</td><td>0.049</td><td>98.7%</td></tr><tr><td>7</td><td>3.23M</td><td>0.047</td><td>98.6%</td></tr><tr><td>8</td><td>3.69M</td><td>0.045</td><td>98.8%</td></tr><tr><td>9</td><td>4.15M</td><td>0.042</td><td>99.0%</td></tr><tr><td>10</td><td>4.61M</td><td>0.036</td><td>98.8%</td></tr></tbody></table>
@@ -364,7 +364,7 @@ x = x + conv1d_k( LayerNorm(x) , out = dim x ratio )    ← kernel、ratio 来�
   <p>如果 recall@k 和随机基线差不多，那就不能拿超网当筛选器——本次正处在边缘：
   recall@1 为 0，recall@3 与基线持平。用法判断标准：τ &gt; 0.7 可当可靠代理；
   0.3–0.7 只能粗筛且必须复核；τ &lt; 0.3 基本无效（阈值任务相关，需自己量）。</p>
-  <div class="warn"><b>教学要点</b>：τ 只有 0.33，说明“超网最优”这个结论并不天然可信。
+  <div class="warn"><b>结论</b>：τ 只有 0.33，说明“超网最优”这个结论并不天然可信。
   样本量小（10 个候选）时 τ 的置信区间很宽，所以上面的数字只用于<b>演示方法</b>，不作为结论。</div>
   <h3>那超网还能用吗？三种安全用法</h3>
   <ol>
@@ -388,7 +388,7 @@ x = x + conv1d_k( LayerNorm(x) , out = dim x ratio )    ← kernel、ratio 来�
 </section>
 
 <section id="run">
-  <h2>8 复现与教学安排<span class="tag">动手</span></h2>
+  <h2>8 复现与文件结构<span class="tag">复现</span></h2>
   <h3>一条命令</h3>
   <pre class="ascii">PYTHONPATH=. ../.venv/bin/python examples/run_demo.py --save-weights</pre>
   <p>脚本会按 <code class="inline">--budget</code>（默认 300 秒）自动决定训练步数：先热身测速，再把剩下的时间分给三明治训练和排序实验。
@@ -403,12 +403,12 @@ x = x + conv1d_k( LayerNorm(x) , out = dim x ratio )    ← kernel、ratio 来�
   tasks.py          任务接口（batch / fixed_batches / batch_fn）
   dataset.py        MNIST（gzip+IDX 结构校验 + SHA-256，可离线 --dataset bars）
   synthetic.py      合成条形图任务（无网络时的回退）
-  viz.py            教学图（matplotlib，headless）
+  viz.py            报告用的图（matplotlib，headless）
   report.py         本页的 HTML 生成器
 examples/run_demo.py  端到端演示（带时间预算）
 tests/test_supernet.py 35 个回归测试</pre>
-  <h3>课堂讨论：三个问题</h3>
-  <p>先让学生只看第 5、6 节的数据自己回答，再对照教师用文档：</p>
+  <h3>三个开放问题</h3>
+  <p>只用第 5、6 节的数据就能回答；答案与推导在 <code class="inline">docs/notes.md</code>。</p>
   <div class="ok">
     <p><b>① 最小子网的损失，一定会高于最大子网吗？</b>
     看第 5 节的深度/宽度扫描与逐张预测，找出反例，再说清楚“为什么通常更差”究竟是从哪儿来的。</p>
@@ -417,8 +417,8 @@ tests/test_supernet.py 35 个回归测试</pre>
     <p><b>③ 当 Kendall τ 只有 0.3 左右时，还能用超网做搜索吗？</b>
     请给出一个可量化的判断标准，而不只是“能用/不能用”。</p>
   </div>
-  <p style="color:var(--muted);font-size:12.5px">参考答案、45 分钟课堂节奏、常见误答见仓库里的
-  <code class="inline">docs/instructor_notes.md</code>（教师用，不随报告重新生成）。</p>
+  <p style="color:var(--muted);font-size:12.5px">参考答案、两个开关的消融结论、常见误区见仓库里的
+  <code class="inline">docs/notes.md</code>（不随报告重新生成）。</p>
 
   <h3>如何严格复现这份报告</h3>
   <table><thead><tr><th>随机源</th><th>派生方式</th><th>影响范围</th></tr></thead><tbody><tr><td>超网初始化 + 三明治采样</td><td>torch.manual_seed(seed) / random.Random(seed)</td><td>权重初值、每步抽到的随机子网</td></tr><tr><td>训练数据流</td><td>task.batch_fn(..., seed=0)</td><td>每一步的 batch</td></tr><tr><td>评测批次</td><td>task.fixed_batches(..., seed=0 + 101)</td><td>所有子网共用的测试图</td></tr><tr><td>示例子网（第 2 节）</td><td>random.Random(seed + 7)</td><td>示例 spec 与第 3 节示意图</td></tr><tr><td>排序实验的候选</td><td>random.Random(seed)</td><td>参与审计的候选子网</td></tr><tr><td>每个候选的独立训练</td><td>torch.manual_seed(seed x 1000 + 序号 + 1)</td><td>真值排序</td></tr></tbody></table>
@@ -439,7 +439,7 @@ tests/test_supernet.py 35 个回归测试</pre>
   生成物（<code class="inline">report/</code>）不算在内——所以拿到 <code class="inline">+dirty</code>
   就说明这份数字对应的代码不是某个 commit 的干净状态。</div>
 
-  <h3>读完应该能回答</h3>
+  <h3>核心要点</h3>
   <ol>
     <li>超网省下了什么、又<b>没有</b>省下什么？（训练 vs 测量）</li>
     <li>为什么通道可以切片、卷积核不行、深度用截断就够了？</li>
@@ -451,10 +451,10 @@ tests/test_supernet.py 35 个回归测试</pre>
 </section>
 
 <section id="exercises">
-  <h2>9 自己动手<span class="tag">练习</span></h2>
+  <h2>9 可复现的实验<span class="tag">动手</span></h2>
   <p>下面每个实验都保留原来的评估口径（同一批测试图、同样的独立训练步数），所以结果可以直接和本节上面的数字对比。</p>
-  <h3>六个可以现场改的地方</h3>
-  <p>每个都只需要一条命令或几行代码，改完重跑一次，把“换了个旋钮会发生什么”变成学生自己的观察。</p>
+  <h3>六个可以直接改的旋钮</h3>
+  <p>每个都只需要一条命令或几行代码，改一个旋钮重跑一次，观察它变在哪里。</p>
   <table><thead><tr><th>改什么</th><th>怎么改</th><th>看哪里</th></tr></thead><tbody><tr><td>只留 max + min 两条腿</td><td><code class="inline">--n-random 0</code></td><td>第 4 节覆盖图会明显变窄；随机子网精度下降——证明“覆盖”不是白来的</td></tr><tr><td>训练量砍到很小</td><td><code class="inline">--steps 200 --budget 60</code></td><td>第 6 节的 τ 和 recall@k 会一起变差：超网质量决定排序可用性</td></tr><tr><td>缩小 FFN 分支集合</td><td>search_space.py 里 FfnKernels 改成 (1, 3)</td><td>空间候选数、覆盖直方图、以及第 5 节曲线是否更平</td></tr><tr><td>换划分方式</td><td>search_space.py 里 EMBED_DIMS 增加一个宽度</td><td>第 5 节右图会多一个点，看它落在成本-质量曲线的哪个位置</td></tr><tr><td>换池化方式</td><td>supernet.py 里 mean 改成取最后一个 token</td><td>精度与第 5 节扫描曲线的变化（分类任务里池化选择影响很大）</td></tr><tr><td>只改报告文案</td><td><code class="inline">PYTHONPATH=. python3 examples/render_report.py</code></td><td>秒级重渲染，不重新训练，数字保持不变</td></tr></tbody></table>
   <h3>两次消融的实测结果</h3>
   <p>这不是本页那一次运行的数字，而是另外跑的两次（同机、同评估口径：同一批测试图，每个候选独立训练 120–150 步），每次只改一个设置：</p>
@@ -487,7 +487,7 @@ tests/test_supernet.py 35 个回归测试</pre>
 </section>
 
 <footer>
-  由 <code class="inline">examples/run_demo.py</code> 自动生成 · 2026-11-01 17:07:57 ·
+  由 <code class="inline">examples/run_demo.py</code> 自动生成 · 2026-11-01 17:17:54 ·
   图中标签使用英文，因为 matplotlib 默认字体没有中文字形。
 </footer>
 

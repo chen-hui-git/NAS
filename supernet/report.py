@@ -1,4 +1,4 @@
-"""Render the self-contained teaching report (HTML) for one demo run.
+"""Render the self-contained HTML report for one demo run.
 
 The prose is static; every number, figure and code excerpt comes from the run that
 produced it. Code is read from the real source files through snippet markers, so the
@@ -342,7 +342,7 @@ def build_report(context: dict, out_path: Path) -> Path:
             ("family", "5 一次训练一个族"),
             ("trap", "6 陷阱：排序不一致"),
             ("budget", "7 预算记账"),
-            ("run", "8 复现与教学安排"),
+            ("run", "8 复现与文件结构"),
             ("exercises", "9 自己动手"),
             ("refs", "10 参考文献"),
         )
@@ -353,7 +353,7 @@ def build_report(context: dict, out_path: Path) -> Path:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>超网（Supernet）最小可运行教学实验</title>
+<title>超网（Supernet）实践：MNIST 上的权重共享 NAS</title>
 <style>{CSS}</style>
 </head>
 <body>
@@ -361,7 +361,7 @@ def build_report(context: dict, out_path: Path) -> Path:
 
 <header class="hero">
   <h1>超网（Supernet）：一次训练，得到一个子网族</h1>
-  <p class="lead">最小可运行的权重共享 NAS 教学实验，训练规则用的是三明治采样（sandwich rule）。本页所有数字与图都来自这一次真实运行。</p>
+  <p class="lead">MNIST 手写数字上的权重共享 NAS 实践：一次训练得到一个子网族，训练规则是三明治采样（sandwich rule）。本页所有数字与图都来自这一次真实运行。</p>
   <div class="meta">
     <span class="pill">数据集 {html.escape(dataset["name"])}</span>
     <span class="pill">输入 {dataset["input_features"]}×{dataset["seq_len"]}</span>
@@ -582,7 +582,7 @@ x = x + conv1d_k( LayerNorm(x) , out = dim x ratio )    ← kernel、ratio 来�
     <li><b>右图怎么用？</b> 每一点都是一个“可直接部署”的配置：横轴是成本（参数量），纵轴是质量。
     选模型就是在左上角找点——这就是超网真正交付的东西：<b>一条成本-质量曲线，而不是一个架构</b>。</li>
     <li><b>注意非单调。</b> 宽度扫描里更宽的子网偶尔更差（本次 w96 就低于 w64），
-    这不是 bug，而是“训练不均衡 + 评测噪声”的体现，值得让学生自己找反例。</li>
+    这不是 bug，而是“训练不均衡 + 评测噪声”的体现，值得自己去找反例。</li>
   </ul>
   <h3>深度扫描明细</h3>
   {_table(["depth", "参数量", "验证损失", "验证准确率"], depth_rows)}
@@ -627,7 +627,7 @@ x = x + conv1d_k( LayerNorm(x) , out = dim x ratio )    ← kernel、ratio 来�
   <p>如果 recall@k 和随机基线差不多，那就不能拿超网当筛选器——本次正处在边缘：
   recall@1 为 0，recall@3 与基线持平。用法判断标准：τ &gt; 0.7 可当可靠代理；
   0.3–0.7 只能粗筛且必须复核；τ &lt; 0.3 基本无效（阈值任务相关，需自己量）。</p>
-  <div class="warn"><b>教学要点</b>：τ 只有 {_fmt(ranking["kendall_tau"], 2)}，说明“超网最优”这个结论并不天然可信。
+  <div class="warn"><b>结论</b>：τ 只有 {_fmt(ranking["kendall_tau"], 2)}，说明“超网最优”这个结论并不天然可信。
   样本量小（{ranking["num_candidates"]} 个候选）时 τ 的置信区间很宽，所以上面的数字只用于<b>演示方法</b>，不作为结论。</div>
   <h3>那超网还能用吗？三种安全用法</h3>
   <ol>
@@ -674,7 +674,7 @@ x = x + conv1d_k( LayerNorm(x) , out = dim x ratio )    ← kernel、ratio 来�
 </section>
 
 <section id="run">
-  <h2>8 复现与教学安排<span class="tag">动手</span></h2>
+  <h2>8 复现与文件结构<span class="tag">复现</span></h2>
   <h3>一条命令</h3>
   <pre class="ascii">{html.escape(run["command"])}</pre>
   <p>脚本会按 <code class="inline">--budget</code>（默认 300 秒）自动决定训练步数：先热身测速，再把剩下的时间分给三明治训练和排序实验。
@@ -689,12 +689,12 @@ x = x + conv1d_k( LayerNorm(x) , out = dim x ratio )    ← kernel、ratio 来�
   tasks.py          任务接口（batch / fixed_batches / batch_fn）
   dataset.py        MNIST（gzip+IDX 结构校验 + SHA-256，可离线 --dataset bars）
   synthetic.py      合成条形图任务（无网络时的回退）
-  viz.py            教学图（matplotlib，headless）
+  viz.py            报告用的图（matplotlib，headless）
   report.py         本页的 HTML 生成器
 examples/run_demo.py  端到端演示（带时间预算）
 tests/test_supernet.py 35 个回归测试</pre>
-  <h3>课堂讨论：三个问题</h3>
-  <p>先让学生只看第 5、6 节的数据自己回答，再对照教师用文档：</p>
+  <h3>三个开放问题</h3>
+  <p>只用第 5、6 节的数据就能回答；答案与推导在 <code class="inline">docs/notes.md</code>。</p>
   <div class="ok">
     <p><b>① 最小子网的损失，一定会高于最大子网吗？</b>
     看第 5 节的深度/宽度扫描与逐张预测，找出反例，再说清楚“为什么通常更差”究竟是从哪儿来的。</p>
@@ -703,8 +703,8 @@ tests/test_supernet.py 35 个回归测试</pre>
     <p><b>③ 当 Kendall τ 只有 0.3 左右时，还能用超网做搜索吗？</b>
     请给出一个可量化的判断标准，而不只是“能用/不能用”。</p>
   </div>
-  <p style="color:var(--muted);font-size:12.5px">参考答案、45 分钟课堂节奏、常见误答见仓库里的
-  <code class="inline">docs/instructor_notes.md</code>（教师用，不随报告重新生成）。</p>
+  <p style="color:var(--muted);font-size:12.5px">参考答案、两个开关的消融结论、常见误区见仓库里的
+  <code class="inline">docs/notes.md</code>（不随报告重新生成）。</p>
 
   <h3>如何严格复现这份报告</h3>
   {_table(
@@ -737,7 +737,7 @@ tests/test_supernet.py 35 个回归测试</pre>
   生成物（<code class="inline">report/</code>）不算在内——所以拿到 <code class="inline">+dirty</code>
   就说明这份数字对应的代码不是某个 commit 的干净状态。</div>
 
-  <h3>读完应该能回答</h3>
+  <h3>核心要点</h3>
   <ol>
     <li>超网省下了什么、又<b>没有</b>省下什么？（训练 vs 测量）</li>
     <li>为什么通道可以切片、卷积核不行、深度用截断就够了？</li>
@@ -749,10 +749,10 @@ tests/test_supernet.py 35 个回归测试</pre>
 </section>
 
 <section id="exercises">
-  <h2>9 自己动手<span class="tag">练习</span></h2>
+  <h2>9 可复现的实验<span class="tag">动手</span></h2>
   <p>下面每个实验都保留原来的评估口径（同一批测试图、同样的独立训练步数），所以结果可以直接和本节上面的数字对比。</p>
-  <h3>六个可以现场改的地方</h3>
-  <p>每个都只需要一条命令或几行代码，改完重跑一次，把“换了个旋钮会发生什么”变成学生自己的观察。</p>
+  <h3>六个可以直接改的旋钮</h3>
+  <p>每个都只需要一条命令或几行代码，改一个旋钮重跑一次，观察它变在哪里。</p>
   {_table(
       ["改什么", "怎么改", "看哪里"],
       [

@@ -1,4 +1,6 @@
-# NAS — 超网（Supernet）+ 三明治采样 教学 Demo
+# NAS — 超网（Supernet）实践：MNIST 上的权重共享 NAS
+
+用公开的 MNIST 手写数字做一次**真实的超网实践**：一个 Conv1d Transformer 超网，一次训练，得到一整个子网族，并把原理、代码、实测数字和失效场景都摊开。
 
 一个最小、可运行、可在笔记本上 3–5 分钟跑完的**权重共享 NAS（one-shot supernet）**实验：
 
@@ -7,7 +9,7 @@
 - 用**三明治规则**训练：每一步固定训练 `max` + `min` + 2 个随机子网，损失求和后只做一次 optimizer step；
 - 训练完在**同一份权重**里直接取出任意子网打分（不再训练），得到一整条“参数量–准确率”曲线；
 - 顺手量一个关键陷阱：**超网内的排序 vs 每个子网独立训练的排序**（Kendall τ / Spearman ρ / regret）；
-- 自动生成一份**中文教学报告 HTML**（原理、真实代码、图、本次运行的实测数字、课堂节奏建议）。
+- 自动生成一份**中文报告 HTML**（原理、真实代码、图、本次运行的实测数字）。
 
 ---
 
@@ -19,7 +21,7 @@ cd NAS
 # 完整版（默认 300 秒预算，自动决定训练步数）
 PYTHONPATH=. python3 examples/run_demo.py --open
 
-# 一分钟速览（课堂现场演示用）
+# 一分钟速览（快速验证链路）
 PYTHONPATH=. python3 examples/run_demo.py --budget 60 --steps 300 --candidates 4
 
 # 完全离线（合成条形图任务，不下载任何数据）
@@ -52,7 +54,7 @@ Kendall τ ≈ +0.33、recall@5 = 4/5、recall@3 = 0/3（随机基线 0.30）—
 
 | 产物 | 说明 |
 | --- | --- |
-| `report/supernet_demo.html` | 中文教学报告（自包含，图片内嵌 base64，可直接发学生） |
+| `report/supernet_demo.html` | 中文报告（自包含，图片内嵌 base64，可直接分享） |
 | `report/figures/*.png` | 6 张图：切片示意（**由示例 spec 真实画出**：共享张量用到的通道块 + 每层选中的 FFN 分支）、三条腿损失+准确率、空间覆盖、子网族曲线、排序散点、逐张预测 |
 | `report/metrics.json` | 本次运行的全部数字（空间、参数、准确率、排序相关性、耗时明细） |
 | `report/sandwich_log.jsonl` | 每一步四条腿的 loss / acc 与对应 arch_id，可逐行复现/画图 |
@@ -88,11 +90,11 @@ supernet/
   dataset.py        MNIST 下载+双重校验；MNISTTask
   synthetic.py      合成条形图任务（离线回退）
   shrink.py         渐进收缩排程（--shrink-stages，默认关）
-  viz.py            教学图（matplotlib，headless，英文标签）
+  viz.py            报告用的图（matplotlib，headless，英文标签）
   report.py         HTML 报告生成器（代码片段从源码里按标记抽取）
 examples/run_demo.py      端到端演示，带墙钟时间预算
 examples/render_report.py 只重渲染 HTML（改文案不用重新训练）
-docs/instructor_notes.md  教师用：课堂节奏 + 三个问题的参考答案
+docs/notes.md             开放问题与常见误区（带实测数字，不随运行变化）
 docs/comparison.md        三组同预算实测：joint / 渐进收缩 / 子网蒸馏
 docs/finetune.md          导出子网的微调配方与实测收益
 tests/test_supernet.py    35 个回归测试
@@ -142,9 +144,9 @@ max 子网是质量上限兼“教师”，min 子网防止低端掉队，随机
 
 ---
 
-## 教学报告
+## 报告结构
 
-`report/supernet_demo.html` 是本仓库的主要教学材料，包含：
+`report/supernet_demo.html` 是本仓库的主要产物，包含：
 
 1. 什么是超网（为什么省训练不省测量）+ **术语速查表**；
 2. 弹性搜索空间（表格 + 具体 spec + **每层三个字段的含义** + **arch_id 记账坑**）；
@@ -153,11 +155,11 @@ max 子网是质量上限兼“教师”，min 子网防止低端掉队，随机
 5. 一次训练得到一个子网族（深度/宽度扫描曲线 + **这两条曲线怎么读** + 两个子网逐张预测）；
 6. 陷阱：排序不一致（散点图 + τ/ρ/regret + **recall@k 与随机基线对比** + 逐候选对照表）；
 7. 预算记账（`evaluator_kind`、`subnets_per_step`、独立训练次数怎么记）；
-8. 复现命令、文件结构、课堂讨论问题、**读完应该能回答的六个问题**；
-9. **自己动手**：六个可现场改的旋钮 + **两次消融的实测结果**；
+8. 复现命令、文件结构、三个开放问题、**核心要点**；
+9. **可复现的实验**：六个可以直接改的旋钮 + **两次消融的实测结果**；
 10. 参考文献。
 
-其中 **§8 的三个讨论问题和 §9 的练习答案**在 `docs/instructor_notes.md`（教师用，不随报告重新生成）。
+其中 **§8 的开放问题答案**与 §9 各实验的结论在 `docs/notes.md`（不随报告重新生成）。
 
 图中标签用英文，因为 matplotlib 默认字体没有中文字形。
 
@@ -165,7 +167,7 @@ max 子网是质量上限兼“教师”，min 子网防止低端掉队，随机
 
 ## 局限（重要）
 
-- 这是**教学 Demo**，不是 SOTA 实现：模型很小、只跑 1 个种子、排序实验的候选数少，
+- 这是**最小可复现实践**，不是 SOTA 实现：模型很小、只跑 1 个种子、排序实验的候选数少，
   τ 的置信区间很宽，第 6 节的数字只用于演示方法，不作为结论。
 - 切片是近似：窄子网继承宽子网的权重值但没有单独训练过，导出上线前需要 fine-tune。
 - 本实现用 LayerNorm，因此导出子网时不需要 BN 重估；换成 BatchNorm 必须做 BN re-estimation。
@@ -185,7 +187,7 @@ PYTHONPATH=. python3 -m unittest discover -s tests -v
 切片示意图的格距与渲染、报告代码片段抽取与高亮。
 
 **风格约定：不做防御式校验。** `SubnetSpec.validate`、张量形状检查、通道容量越界检查这类
-`if ...: raise` 全部不写，出错就让 PyTorch 自己报 —— 教学代码里每一行都应该是算法本身。
+`if ...: raise` 全部不写，出错就让 PyTorch 自己报 —— 示例代码里每一行都应该是算法本身。
 （例外：MNIST 下载要做 gzip/IDX 结构校验，那是数据完整性，不是调用方校验。）
 
 ## 参考文献

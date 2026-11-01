@@ -1,4 +1,4 @@
-"""Teaching figures for the supernet demo.
+"""Figures for the supernet demo report.
 
 Headless matplotlib only. Every figure uses English labels because the default
 matplotlib font has no CJK glyphs; the surrounding HTML report is in Chinese.
