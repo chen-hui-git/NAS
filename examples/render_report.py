@@ -11,12 +11,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from supernet.report import build_report
+
+LOGGER = logging.getLogger("supernet")
 
 FIGURE_FILES = {
     "slicing": "slicing.png",
@@ -29,6 +32,7 @@ FIGURE_FILES = {
 
 
 def main(argv: list[str] | None = None) -> int:
+    logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stdout)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--metrics", default="report/metrics.json")
     parser.add_argument("--figures", default="report/figures")
@@ -67,7 +71,7 @@ def main(argv: list[str] | None = None) -> int:
         ffn_ratios=tuple(space_meta["ffn_ratios"]),
         ffn_kernels=tuple(space_meta["ffn_kernels"]),
     )
-    print(f"schematic redrawn from {source}: {example_spec.get('arch_id', '?')}")
+    LOGGER.info("schematic redrawn from %s: %s", source, example_spec.get("arch_id", "?"))
 
     context = {
         "run": metrics["run"],
@@ -81,7 +85,7 @@ def main(argv: list[str] | None = None) -> int:
         "example_spec": json.dumps(example_spec, indent=2, ensure_ascii=False),
     }
     out = build_report(context, Path(args.out))
-    print(f"wrote {out}")
+    LOGGER.info("wrote %s", out)
     return 0
 
 

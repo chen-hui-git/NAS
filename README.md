@@ -31,6 +31,8 @@ PYTHONPATH=. python3 examples/run_demo.py --dataset bars
 PYTHONPATH=. python3 examples/run_demo.py --distill-weight 0.0     # 关掉蒸馏（对照用）
 PYTHONPATH=. python3 examples/run_demo.py --shrink-stages 4        # 打开渐进收缩
 PYTHONPATH=. python3 examples/run_demo.py --save-weights            # 存 supernet.pt，供事后导出/微调
+PYTHONPATH=. python3 examples/run_demo.py --fine-tune-steps 0       # 跳过导出子网的微调对照
+PYTHONPATH=. python3 examples/run_demo.py --log-level WARNING       # 只保留警告（进度走 logging）
 ```
 
 需要 Python 3.10+ 和 PyTorch 2.0+，绘图用 matplotlib，全程只用 Conv1d（没有 `nn.Linear`）。
@@ -41,11 +43,12 @@ PYTHONPATH=. python3 examples/run_demo.py --save-weights            # 存 supern
 （约 100 vs 134 ms）却是两倍的图片量，所以 MPS 默认取 128。
 用 `--device cpu` 可以对拍。
 
-参考结果（M5 Pro，MPS，batch 128，KD λ=0.5，204 秒，1249 步 ≈ 2.7 个 epoch）：
-max 子网 **98.8%**、min 子网 **96.2%**、随机子网 **96.7%**；
-深度扫描 d4→d10 = 98.5 / 98.6 / 98.7 / 98.6 / 98.8 / 99.0 / 98.8%，
-宽度扫描 w64/96/128 = 95.9 / 96.3 / 98.8%；
-Kendall τ ≈ +0.33、recall@5 = 4/5、recall@3 = 0/3（随机基线 0.30）——排序仍然不可靠，见报告第 6 节。
+参考结果（M5 Pro，MPS，batch 128，KD λ=0.5，195 秒，1058 步 ≈ 2.3 个 epoch）：
+max 子网 **97.7%**、min 子网 **95.7%**、随机子网 **94.1%**；
+深度扫描 d4→d10 = 96.6 / 97.2 / 97.2 / 97.6 / 97.7 / 97.7 / 97.7%，
+宽度扫描 w64/96/128 = 91.0 / 95.2 / 97.7%；
+导出后各微调 150 步：max 98.91%、min 97.19%、随机 97.42%；
+Kendall τ ≈ +0.24、recall@3 = 2/3、recall@5 = 2/5（随机基线 0.30 / 0.50）——排序仍然不可靠，见报告第 6 节。
 （重跑会有 ±1pt 抖动；这些数字与仓库里提交的 `report/metrics.json` 一致。）
 脚本按 `--budget` 自适应：先热身测速，再把剩余时间分给三明治训练、排序实验和出图，
 所以慢机器上也是“大约 5 分钟以内”，而不是“跑一夜”。
@@ -150,7 +153,7 @@ max 子网是质量上限兼“教师”，min 子网防止低端掉队，随机
 
 1. 什么是超网（为什么省训练不省测量）+ **术语速查表**；
 2. 弹性搜索空间（表格 + 具体 spec + **每层三个字段的含义** + **arch_id 记账坑**）；
-3. 权重共享与切片（示意图 + 真实代码 + 注意力如何一起变窄 + “切片是近似”的警告）；
+3. 权重共享与切片（示意图 + 真实代码 + 注意力如何一起变窄 + “切片是近似”的警告 + **导出微调的实测收益表**）；
 4. 三明治规则（代码 + 三条腿 loss/acc 曲线 + 覆盖直方图）；
 5. 一次训练得到一个子网族（深度/宽度扫描曲线 + **这两条曲线怎么读** + 两个子网逐张预测）；
 6. 陷阱：排序不一致（散点图 + τ/ρ/regret + **recall@k 与随机基线对比** + 逐候选对照表）；

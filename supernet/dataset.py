@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+import logging
 from pathlib import Path
 import struct
 import urllib.request
@@ -24,6 +25,7 @@ MNIST_MIRRORS = (
     "https://ossci-datasets.s3.amazonaws.com/mnist",
 )
 DEFAULT_DATA_DIR = Path(__file__).resolve().parents[1] / "data"
+LOGGER = logging.getLogger(__name__)
 
 # name -> (expected decompressed file name, expected gzipped size, expected sha256)
 MNIST_FILES: dict[str, tuple[int, str]] = {
@@ -85,7 +87,7 @@ def ensure_mnist(
         for mirror in mirrors:
             url = f"{mirror}/{name}"
             if verbose:
-                print(f"  downloading {name} from {mirror}")
+                LOGGER.info("  downloading %s from %s", name, mirror)
             try:
                 with urllib.request.urlopen(url, timeout=120) as response:
                     payload = response.read()
@@ -96,7 +98,7 @@ def ensure_mnist(
             path.write_bytes(payload)
             if _sha256(path) != expected_sha:
                 if verbose:
-                    print(f"  warning: {name} differs from the recorded sha256 "
+                    LOGGER.warning("%s differs from the recorded sha256 "
                           f"(mirror recompressed the file); structure verified")
             break
         else:

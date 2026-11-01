@@ -265,6 +265,35 @@ def build_report(context: dict, out_path: Path) -> Path:
         )
         candidate_classes.append("bad" if disagree else "")
 
+    fine_tune = context.get("fine_tune") or {}
+    fine_tune_rows = [
+        [
+            html.escape(row["label"]),
+            _millions(row["parameters"]),
+            f'{row["zero_shot"] * 100:.2f}%',
+            f'{row["fine_tuned"] * 100:.2f}%',
+            f'{row["gain"] * 100:+.2f} pt',
+        ]
+        for row in fine_tune.get("rows", [])
+    ]
+    if fine_tune_rows:
+        fine_tune_block = (
+            f'<h3>“这是近似”的实测代价：导出后再微调能补多少</h3>'
+            f"<p>把三个子网从超网里导出成独立模型（权重直接继承切片，所以 zero-shot 分数就等于它在超网内的分数），"
+            f"再用 {fine_tune.get('steps', 0)} 步、lr={fine_tune.get('lr', 3e-4)} 单独训练这一个子网：</p>"
+            + _table(
+                ["子网", "参数量", "zero-shot（超网内）", f"微调 {fine_tune.get('steps', 0)} 步", "收益"],
+                fine_tune_rows,
+            )
+            + "<p>收益与子网的<b>欠训程度</b>单调相关：越小的、分支越冷门的子网补得越多，"
+            "最贵的 max 子网几乎补不动。这也说明“切片”继承来的权重对窄子网只是近似——"
+            "上线某个具体子网前值得花这几百步（详见 <code class=\"inline\">docs/finetune.md</code>）。</p>"
+        )
+    else:
+        fine_tune_block = (
+            '<div class="note">本次未跑微调对照（<code class="inline">--fine-tune-steps 0</code>）。</div>'
+        )
+
     predictions = context["predictions"]
     truth = predictions["true"]
     correct_max = sum(1 for a, b in zip(truth, predictions["max"]) if a == b)
@@ -487,6 +516,7 @@ x = x + conv1d_k( LayerNorm(x) , out = dim x ratio )    ← kernel、ratio 来�
   <div class="warn"><b>这是近似，不是等价。</b> 取“前 d 个通道”得到的窄卷积，参数值继承自宽子网，但没有单独训练过；
   导出子网上线前需要 fine-tune。另外，本仓库用 LayerNorm，所以导出时不需要重估统计量；如果换成 BatchNorm，
   必须用一批数据重新校准 BN（BN re-estimation），否则精度会明显掉。</div>
+  {fine_tune_block}
 </section>
 
 <section id="sandwich">

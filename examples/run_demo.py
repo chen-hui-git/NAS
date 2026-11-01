@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""End-to-end supernet demo: train with the sandwich rule, then teach from the result.
+"""End-to-end supernet practice: train with the sandwich rule, then read the numbers off.
 
 Task: MNIST digit classification, where each of the 28 image rows is one token. The run
 is organised around a wall-clock budget (default 300 s):
@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import math
 import platform
 from pathlib import Path
@@ -40,6 +41,7 @@ from supernet import (
     SearchSpace,
     SubnetSpec,
     average_subnet_loss,
+    fine_tune_subnet,
     make_task,
     normalize_images,
     run_ranking_experiment,
@@ -48,8 +50,22 @@ from supernet import (
 from supernet.search_space import LayerChoice
 
 
-def say(message: str) -> None:
-    print(message, flush=True)
+LOGGER = logging.getLogger("supernet")
+
+
+def configure_logging(level: str) -> None:
+    """Route the run's progress through logging.
+
+    The format keeps the column layout of the CLI output; the level is still the usual
+    filter, so --log-level WARNING silences the progress lines and DEBUG is available for
+    library-level diagnostics.
+    """
+    logging.basicConfig(
+        level=getattr(logging, level.upper(), logging.INFO),
+        format="%(message)s",
+        stream=sys.stdout,
+        force=True,
+    )
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -84,15 +100,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--eval-batches", type=int, default=10)
     parser.add_argument("--train-share", type=float, default=0.6,
                         help="fraction of the remaining budget spent on sandwich training")
-    parser.add_argument("--report-reserve", type=float, default=45.0,
-                        help="seconds reserved for the ranking experiment, figures and report")
+    parser.add_argument("--report-reserve", type=float, default=70.0,
+                        help="seconds reserved for ranking audit, fine-tuning, figures and report")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--out", default="report", help="output directory for figures and HTML")
     parser.add_argument("--no-figures", action="store_true")
     parser.add_argument("--no-report", action="store_true")
+    parser.add_argument("--fine-tune-steps", type=int, default=150,
+                        help="steps to specialize each exported subnet (0 = skip); measured "
+                             "to cost ~15-20 s and to lift small subnets a few points")
     parser.add_argument("--save-weights", action="store_true",
                         help="write the trained supernet to <out>/supernet.pt (~74 MB) "
                              "so subnets can be exported and fine-tuned later")
+    parser.add_argument("--log-level", default="INFO",
+                        choices=("DEBUG", "INFO", "WARNING", "ERROR"),
+                        help="logging verbosity for the run's progress output")
     parser.add_argument("--open", action="store_true", help="open the HTML report when finished")
     return parser.parse_args(argv)
 
@@ -156,6 +178,7 @@ def quality_spec(space: SearchSpace, depth: int, embed_dim: int) -> SubnetSpec:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    configure_logging(args.log_level)
     started = time.monotonic()
     started_at = time.strftime("%Y-%m-%d %H:%M:%S")
     out_dir = Path(args.out)
@@ -175,7 +198,7 @@ def main(argv: list[str] | None = None) -> int:
             torch.use_deterministic_algorithms(True)
             deterministic = True
         except Exception as error:  # backend refused: keep going, but record it
-            print(f"  warning: deterministic algorithms unavailable ({error})")
+            LOGGER.warning("deterministic algorithms unavailable (%s)", error)
     # Measured on an M5 Pro: batch 64 and 128 cost almost the same per step
     # (100 vs 134 ms) while 128 carries twice the images, so 128 is the better default.
     batch_size = args.batch_size if args.batch_size is not None else (
@@ -187,30 +210,30 @@ def main(argv: list[str] | None = None) -> int:
         # *image* budget fixed and let the step count follow the batch size.
         audit_images = 16000
         args.standalone_steps = max(20, round(audit_images / batch_size))
-    say("=" * 68)
-    say(f"超网实践：三明治规则 + 子网族    预算 {args.budget:.0f}s   数据集 {args.dataset}")
-    say(f"设备 {device}   batch {batch_size}   "
+    LOGGER.info("=" * 68)
+    LOGGER.info(f"超网实践：三明治规则 + 子网族    预算 {args.budget:.0f}s   数据集 {args.dataset}")
+    LOGGER.info(f"设备 {device}   batch {batch_size}   "
         f"审计: {args.candidates} 候选 x {args.standalone_steps} 步 "
         f"= {args.candidates * args.standalone_steps * batch_size:,} 图")
-    say(f"渐进收缩 shrink_stages={args.shrink_stages}"
+    LOGGER.info(f"渐进收缩 shrink_stages={args.shrink_stages}"
         f"{'（关闭）' if args.shrink_stages <= 1 else f'（{args.shrink_stages} 级）'}   "
         f"子网蒸馏 distill_weight={args.distill_weight}"
         f"{'（关闭）' if args.distill_weight <= 0 else ''}")
-    say("=" * 68)
+    LOGGER.info("=" * 68)
 
     # ---------------------------------------------------------------- data
     phase = time.monotonic()
-    say("\n[1/7] 加载数据")
+    LOGGER.info("\n[1/7] 加载数据")
     task = make_task(args.dataset, verbose=True, device=device)
-    say(f"      {task.name}: 输入 {task.input_features} 维 x {task.seq_len} 行, "
+    LOGGER.info(f"      {task.name}: 输入 {task.input_features} 维 x {task.seq_len} 行, "
         f"{task.num_classes} 类 ({mark('data', phase):.1f}s)")
     for key, value in task.describe().items():
         if key not in {"name", "num_classes", "input_features", "seq_len"}:
-            say(f"      {key} = {value}")
+            LOGGER.info(f"      {key} = {value}")
 
     # --------------------------------------------------------------- model
     phase = time.monotonic()
-    say("\n[2/7] 构建超网")
+    LOGGER.info("\n[2/7] 构建超网")
     space = SearchSpace(
         num_classes=task.num_classes,
         input_features=task.input_features,
@@ -232,16 +255,16 @@ def main(argv: list[str] | None = None) -> int:
     supernet_params = sum(parameter.numel() for parameter in trainer.model.parameters())
     max_params = trainer.model.subnet_parameter_count(max_spec)
     min_params = trainer.model.subnet_parameter_count(min_spec)
-    say(f"      空间候选数          : {count_architectures(space):,}")
-    say(f"      超网参数量          : {supernet_params / 1e6:.2f}M")
-    say(f"      max 子网 (d{space.max_depth}/{space.max_embed_dim}) : {max_params / 1e6:.2f}M")
-    say(f"      min 子网 (d{space.min_depth}/{space.min_embed_dim})  : {min_params / 1e6:.3f}M")
-    say(f"      一份权重供应        : {supernet_params / max_params:.1f}x 于最大子网 "
+    LOGGER.info(f"      空间候选数          : {count_architectures(space):,}")
+    LOGGER.info(f"      超网参数量          : {supernet_params / 1e6:.2f}M")
+    LOGGER.info(f"      max 子网 (d{space.max_depth}/{space.max_embed_dim}) : {max_params / 1e6:.2f}M")
+    LOGGER.info(f"      min 子网 (d{space.min_depth}/{space.min_embed_dim})  : {min_params / 1e6:.3f}M")
+    LOGGER.info(f"      一份权重供应        : {supernet_params / max_params:.1f}x 于最大子网 "
         f"({mark('model', phase):.2f}s)")
 
     # --------------------------------------------------- warm up and plan
     phase = time.monotonic()
-    say("\n[3/7] 热身测速，规划步数")
+    LOGGER.info("\n[3/7] 热身测速，规划步数")
     batch_fn = task.batch_fn(args.batch_size, seed=args.seed)
     warmup_steps = 5
     timed_steps = 5
@@ -266,15 +289,15 @@ def main(argv: list[str] | None = None) -> int:
     cost_factor = 1.4 if args.shrink_stages > 1 else 1.0
     planned = int(train_budget / (step_seconds * cost_factor))
     planned = max(args.min_steps, min(args.steps, planned))
-    say(f"      单步耗时（中位数）  : {step_seconds * 1000:.0f} ms "
+    LOGGER.info(f"      单步耗时（中位数）  : {step_seconds * 1000:.0f} ms "
         f"(一步 = 1 max + 1 min + {args.n_random} random, "
         f"{args.batch_size / step_seconds:.0f} 图/秒)")
-    say(f"      计划训练步数        : {planned} "
+    LOGGER.info(f"      计划训练步数        : {planned} "
         f"(~{planned * args.batch_size} 张图, ~{planned * step_seconds:.0f}s)")
 
     # ------------------------------------------------------------ training
     phase = time.monotonic()
-    say("\n[4/7] 三明治训练")
+    LOGGER.info("\n[4/7] 三明治训练")
     log_every = max(1, planned // 12)
     history = []
 
@@ -290,7 +313,7 @@ def main(argv: list[str] | None = None) -> int:
             value for role, value in record.role_accuracy.items()
             if role.startswith("random")
         ) / max(1, args.n_random)
-        say(f"      [{bar}] {record.step:4d}/{planned} "
+        LOGGER.info(f"      [{bar}] {record.step:4d}/{planned} "
             f"max loss={record.role_losses['max']:5.3f} acc={record.role_accuracy['max']:.3f}  "
             f"min loss={record.role_losses['min']:5.3f} acc={record.role_accuracy['min']:.3f}  "
             f"rand loss={random_loss:5.3f} acc={random_acc:.3f}")
@@ -303,12 +326,12 @@ def main(argv: list[str] | None = None) -> int:
         deadline=started + max(args.budget - args.report_reserve, args.budget * 0.6),
     )
     train_seconds = mark("train", phase)
-    say(f"      训练完成            : {planned} 步 / "
+    LOGGER.info(f"      训练完成            : {planned} 步 / "
         f"{planned * (1 + 1 + args.n_random)} 个子网次 ({train_seconds:.0f}s)")
 
     # --------------------------------------------------------- evaluation
     phase = time.monotonic()
-    say("\n[5/7] 评估子网族（不再训练）")
+    LOGGER.info("\n[5/7] 评估子网族（不再训练）")
     batches = task.fixed_batches(args.batch_size, args.eval_batches, seed=args.seed + 101)
     chance_loss = math.log(task.num_classes)
     chance_accuracy = 1.0 / task.num_classes
@@ -316,9 +339,9 @@ def main(argv: list[str] | None = None) -> int:
     max_acc = subnet_accuracy(trainer.model, max_spec, batches)
     min_loss = average_subnet_loss(trainer.model, min_spec, batches)
     min_acc = subnet_accuracy(trainer.model, min_spec, batches)
-    say(f"      随机猜测基线        : loss {chance_loss:.3f} / acc {chance_accuracy:.3f}")
-    say(f"      max 子网            : loss {max_loss:.3f} / acc {max_acc:.3f}")
-    say(f"      min 子网            : loss {min_loss:.3f} / acc {min_acc:.3f}")
+    LOGGER.info(f"      随机猜测基线        : loss {chance_loss:.3f} / acc {chance_accuracy:.3f}")
+    LOGGER.info(f"      max 子网            : loss {max_loss:.3f} / acc {max_acc:.3f}")
+    LOGGER.info(f"      min 子网            : loss {min_loss:.3f} / acc {min_acc:.3f}")
 
     depth_sweep = []
     for depth in range(space.min_depth, space.max_depth + 1):
@@ -345,10 +368,10 @@ def main(argv: list[str] | None = None) -> int:
             }
         )
     for row in depth_sweep:
-        say(f"      depth {row['depth']:2d}  {row['parameters'] / 1e6:5.2f}M  "
+        LOGGER.info(f"      depth {row['depth']:2d}  {row['parameters'] / 1e6:5.2f}M  "
             f"loss={row['loss']:.3f}  acc={row['accuracy']:.3f}")
     for row in width_sweep:
-        say(f"      width {row['embed_dim']:3d}  {row['parameters'] / 1e6:5.2f}M  "
+        LOGGER.info(f"      width {row['embed_dim']:3d}  {row['parameters'] / 1e6:5.2f}M  "
             f"loss={row['loss']:.3f}  acc={row['accuracy']:.3f}")
 
     # A fixed generator instead of the global random module: this row and the example
@@ -379,21 +402,49 @@ def main(argv: list[str] | None = None) -> int:
         },
     ]
 
+    # ---- exported-subnet fine-tuning: how much does the slice approximation cost?
+    fine_tune_rows = []
+    if args.fine_tune_steps > 0:
+        LOGGER.info(f"\n      微调导出子网（各 {args.fine_tune_steps} 步，lr=3e-4）")
+        for row, spec in zip(eval_rows, (max_spec, min_spec, intermediate)):
+            tuned = fine_tune_subnet(
+                trainer.model,
+                spec,
+                task,
+                steps=args.fine_tune_steps,
+                batch_size=args.batch_size,
+                seed=args.seed + 31,
+            )
+            tuned_accuracy = subnet_accuracy(tuned, spec, batches)
+            gain = tuned_accuracy - row["accuracy"]
+            fine_tune_rows.append(
+                {
+                    "label": row["label"],
+                    "arch_id": row["arch_id"],
+                    "parameters": row["parameters"],
+                    "zero_shot": row["accuracy"],
+                    "fine_tuned": tuned_accuracy,
+                    "gain": gain,
+                }
+            )
+            LOGGER.info(f"      {row['label']:14s} zero-shot {row['accuracy'] * 100:5.2f}% -> "
+                f"fine-tuned {tuned_accuracy * 100:5.2f}%  ({gain * 100:+.2f} pt)")
+
     preview_images, preview_labels = task.preview()
     preview_inputs = normalize_images(preview_images).to(device)
     predictions = {
         "max": trainer.model.predict(preview_inputs, max_spec).tolist(),
         "min": trainer.model.predict(preview_inputs, min_spec).tolist(),
     }
-    say("\n      预测示例（第一张是 max 子网，第二张是 min 子网）")
-    say(f"      真实    : {preview_labels.tolist()}")
-    say(f"      max     : {predictions['max']}")
-    say(f"      min     : {predictions['min']}")
+    LOGGER.info("\n      预测示例（第一张是 max 子网，第二张是 min 子网）")
+    LOGGER.info(f"      真实    : {preview_labels.tolist()}")
+    LOGGER.info(f"      max     : {predictions['max']}")
+    LOGGER.info(f"      min     : {predictions['min']}")
     mark("eval", phase)
 
     # ------------------------------------------------------------- ranking
     phase = time.monotonic()
-    say("\n[6/7] 超网内排序 vs 独立训练排序")
+    LOGGER.info("\n[6/7] 超网内排序 vs 独立训练排序")
     ranking_config = RankingExperimentConfig(
         num_candidates=args.candidates,
         standalone_steps=args.standalone_steps,
@@ -405,14 +456,14 @@ def main(argv: list[str] | None = None) -> int:
     deadline = started + args.budget - 20.0
 
     def on_candidate(index: int, total: int, spec) -> None:
-        say(f"      独立训练候选 {index + 1}/{total}  "
+        LOGGER.info(f"      独立训练候选 {index + 1}/{total}  "
             f"depth={spec.depth} width={spec.embed_dim} id={spec.arch_id}")
 
     ranking = run_ranking_experiment(
         trainer.model, space, task, ranking_config,
         progress=on_candidate, deadline=deadline, min_candidates=3,
     )
-    say(f"      Kendall tau = {ranking['kendall_tau']:+.3f}   "
+    LOGGER.info(f"      Kendall tau = {ranking['kendall_tau']:+.3f}   "
         f"Spearman rho = {ranking['spearman_rho']:+.3f}   "
         f"top1 一致 = {ranking['top1_agreement']}   "
         f"regret = {ranking['regret']:+.3f}")
@@ -422,7 +473,7 @@ def main(argv: list[str] | None = None) -> int:
     phase = time.monotonic()
     figure_paths = {}
     if not args.no_figures:
-        say("\n[7/7] 绘图与报告")
+        LOGGER.info("\n[7/7] 绘图与报告")
         from supernet import viz
 
         figure_paths = {
@@ -496,13 +547,18 @@ def main(argv: list[str] | None = None) -> int:
             "true": preview_labels.tolist(),
             **predictions,
         },
+        "fine_tune": {
+            "steps": args.fine_tune_steps,
+            "lr": 3e-4,
+            "rows": fine_tune_rows,
+        },
         "example_spec": example_spec,
     }
     weights_path = None
     if args.save_weights:
         weights_path = out_dir / "supernet.pt"
         torch.save(trainer.model.state_dict(), weights_path)
-        say(f"\n      supernet 权重已保存 : {weights_path} "
+        LOGGER.info(f"\n      supernet 权重已保存 : {weights_path} "
             f"({weights_path.stat().st_size / 1e6:.0f} MB)")
 
     metrics_path = out_dir / "metrics.json"
@@ -524,6 +580,7 @@ def main(argv: list[str] | None = None) -> int:
             "width_sweep": width_sweep,
             "ranking": ranking,
             "predictions": metrics["predictions"],
+            "fine_tune": metrics["fine_tune"],
             "figures": figure_paths,
             "example_spec": json.dumps(example_spec, indent=2, ensure_ascii=False),
         }
@@ -531,28 +588,28 @@ def main(argv: list[str] | None = None) -> int:
         mark("report", phase)
 
     # ------------------------------------------------------------ summary
-    say("\n" + "=" * 68)
-    say("结果")
-    say("=" * 68)
-    say(f"  总耗时              : {time.monotonic() - started:.0f}s   (明细: {timings})")
-    say(f"  超网 / max / min     : {supernet_params / 1e6:.2f}M / "
+    LOGGER.info("\n" + "=" * 68)
+    LOGGER.info("结果")
+    LOGGER.info("=" * 68)
+    LOGGER.info(f"  总耗时              : {time.monotonic() - started:.0f}s   (明细: {timings})")
+    LOGGER.info(f"  超网 / max / min     : {supernet_params / 1e6:.2f}M / "
         f"{max_params / 1e6:.2f}M / {min_params / 1e3:.0f}K 参数")
-    say(f"  准确率 猜测 / max / min: {chance_accuracy:.3f} / {max_acc:.3f} / {min_acc:.3f}")
-    say(f"  深度扫描            : " + "  ".join(
+    LOGGER.info(f"  准确率 猜测 / max / min: {chance_accuracy:.3f} / {max_acc:.3f} / {min_acc:.3f}")
+    LOGGER.info(f"  深度扫描            : " + "  ".join(
         f"d{row['depth']}={row['accuracy']:.3f}" for row in depth_sweep))
-    say(f"  宽度扫描            : " + "  ".join(
+    LOGGER.info(f"  宽度扫描            : " + "  ".join(
         f"w{row['embed_dim']}={row['accuracy']:.3f}" for row in width_sweep))
-    say(f"  排序 Kendall tau    : {ranking['kendall_tau']:+.3f}  "
+    LOGGER.info(f"  排序 Kendall tau    : {ranking['kendall_tau']:+.3f}  "
         f"(regret {ranking['regret']:+.3f})")
     if weights_path is not None:
-        say(f"  超网权重            : {weights_path}")
-    say(f"  指标 JSON           : {metrics_path}")
-    say(f"  训练日志            : {log_path}")
+        LOGGER.info(f"  超网权重            : {weights_path}")
+    LOGGER.info(f"  指标 JSON           : {metrics_path}")
+    LOGGER.info(f"  训练日志            : {log_path}")
     if figure_paths:
-        say(f"  图                  : {figures_dir}")
+        LOGGER.info(f"  图                  : {figures_dir}")
     if report_path is not None:
-        say(f"  报告 (HTML)         : {report_path}")
-    say("")
+        LOGGER.info(f"  报告 (HTML)         : {report_path}")
+    LOGGER.info("")
 
     if args.open and report_path is not None:
         import webbrowser
