@@ -1,19 +1,19 @@
 {
   "run": {
-    "started_at": "2026-11-01 09:50:21",
-    "wall_seconds": 170.2,
+    "started_at": "2026-11-01 09:54:23",
+    "wall_seconds": 154.7,
     "timings": {
       "data": 0.04,
       "model": 0.32,
-      "train": 134.24,
-      "eval": 0.91,
-      "ranking": 33.87,
+      "train": 118.82,
+      "eval": 0.9,
+      "ranking": 33.75,
       "figures": 0.52
     },
     "budget_seconds": 300.0,
-    "steps_planned": 2279,
-    "steps_done": 2279,
-    "step_ms": 66.9,
+    "steps_planned": 2031,
+    "steps_done": 2031,
+    "step_ms": 75.1,
     "batch_size": 8,
     "lr": 0.003,
     "n_random": 2,
@@ -67,35 +67,35 @@
     "command": "PYTHONPATH=. ../.venv/bin/python examples/run_demo.py "
   },
   "sandwich": {
-    "steps": 2279,
-    "subnets_trained": 9116,
+    "steps": 2031,
+    "subnets_trained": 8124,
     "depth_counts": {
-      "4": 2948,
-      "5": 642,
-      "6": 655,
-      "7": 642,
-      "8": 661,
-      "9": 623,
-      "10": 2945
+      "4": 2632,
+      "5": 573,
+      "6": 593,
+      "7": 570,
+      "8": 595,
+      "9": 545,
+      "10": 2616
     },
     "dim_counts": {
-      "64": 3798,
-      "96": 1508,
-      "128": 3810
+      "64": 3373,
+      "96": 1353,
+      "128": 3398
     },
     "kernel_counts": {
-      "1": 19901,
-      "3": 10576,
-      "5": 33294
+      "1": 17721,
+      "3": 9399,
+      "5": 29646
     },
     "ratio_counts": {
-      "2": 19873,
-      "3": 10534,
-      "4": 33364
+      "2": 17665,
+      "3": 9368,
+      "4": 29733
     },
     "activation_counts": {
-      "gelu": 47862,
-      "silu": 15909
+      "gelu": 42647,
+      "silu": 14119
     }
   },
   "history": [
@@ -3549,431 +3549,6 @@
         "random_0": "20dafb2cce34",
         "random_1": "23b68ed8b1d6"
       }
-    },
-    {
-      "step": 2036,
-      "total_loss": 8.713253736495972,
-      "grad_norm": 2.967877149581909,
-      "role_losses": {
-        "max": 1.9729537963867188,
-        "min": 2.272761821746826,
-        "random_0": 2.2581119537353516,
-        "random_1": 2.209426164627075
-      },
-      "role_arch_ids": {
-        "max": "7e1610f00712",
-        "min": "da78044cc3be",
-        "random_0": "0cb28246bea9",
-        "random_1": "ae3b30dd8276"
-      }
-    },
-    {
-      "step": 2046,
-      "total_loss": 8.668768286705017,
-      "grad_norm": 1.951450228691101,
-      "role_losses": {
-        "max": 1.8827954530715942,
-        "min": 2.243600606918335,
-        "random_0": 2.269166946411133,
-        "random_1": 2.273205280303955
-      },
-      "role_arch_ids": {
-        "max": "7e1610f00712",
-        "min": "da78044cc3be",
-        "random_0": "bab06983a1a5",
-        "random_1": "0e2dd0277b6d"
-      }
-    },
-    {
-      "step": 2056,
-      "total_loss": 8.420289278030396,
-      "grad_norm": 1.9886795282363892,
-      "role_losses": {
-        "max": 1.859055995941162,
-        "min": 2.185180425643921,
-        "random_0": 2.216862440109253,
-        "random_1": 2.1591904163360596
-      },
-      "role_arch_ids": {
-        "max": "7e1610f00712",
-        "min": "da78044cc3be",
-        "random_0": "7b9300809937",
-        "random_1": "4f8e7fa3b8cb"
-      }
-    },
-    {
-      "step": 2066,
-      "total_loss": 7.74554717540741,
-      "grad_norm": 2.239284038543701,
-      "role_losses": {
-        "max": 1.7201100587844849,
-        "min": 2.0899858474731445,
-        "random_0": 1.8936538696289062,
-        "random_1": 2.041797399520874
-      },
-      "role_arch_ids": {
-        "max": "7e1610f00712",
-        "min": "da78044cc3be",
-        "random_0": "66e77e584e22",
-        "random_1": "e1244acb9bf3"
-      }
-    },
-    {
-      "step": 2076,
-      "total_loss": 8.039308309555054,
-      "grad_norm": 2.104156970977783,
-      "role_losses": {
-        "max": 1.7269165515899658,
-        "min": 2.204040288925171,
-        "random_0": 2.068615436553955,
-        "random_1": 2.039736032485962
-      },
-      "role_arch_ids": {
-        "max": "7e1610f00712",
-        "min": "da78044cc3be",
-        "random_0": "9ab0312c9066",
-        "random_1": "8e6f9ee4feee"
-      }
-    },
-    {
-      "step": 2086,
-      "total_loss": 8.078318119049072,
-      "grad_norm": 1.9889806509017944,
-      "role_losses": {
-        "max": 1.7435188293457031,
-        "min": 2.147214889526367,
-        "random_0": 2.1496334075927734,
-        "random_1": 2.0379509925842285
-      },
-      "role_arch_ids": {
-        "max": "7e1610f00712",
-        "min": "da78044cc3be",
-        "random_0": "a06b20bd2a40",
-        "random_1": "ef6810a8fed9"
-      }
-    },
-    {
-      "step": 2096,
-      "total_loss": 8.312589645385742,
-      "grad_norm": 2.255983352661133,
-      "role_losses": {
-        "max": 1.7342612743377686,
-        "min": 2.2331080436706543,
-        "random_0": 2.1678109169006348,
-        "random_1": 2.1774094104766846
-      },
-      "role_arch_ids": {
-        "max": "7e1610f00712",
-        "min": "da78044cc3be",
-        "random_0": "cbec906202c5",
-        "random_1": "8da90c5b94d0"
-      }
-    },
-    {
-      "step": 2106,
-      "total_loss": 7.8831974267959595,
-      "grad_norm": 1.9655194282531738,
-      "role_losses": {
-        "max": 1.752167820930481,
-        "min": 2.137484073638916,
-        "random_0": 2.0679352283477783,
-        "random_1": 1.9256103038787842
-      },
-      "role_arch_ids": {
-        "max": "7e1610f00712",
-        "min": "da78044cc3be",
-        "random_0": "944b371a27ef",
-        "random_1": "62b5f63c9bc6"
-      }
-    },
-    {
-      "step": 2116,
-      "total_loss": 7.522802472114563,
-      "grad_norm": 2.0631182193756104,
-      "role_losses": {
-        "max": 1.6038219928741455,
-        "min": 2.062920331954956,
-        "random_0": 2.0151987075805664,
-        "random_1": 1.840861439704895
-      },
-      "role_arch_ids": {
-        "max": "7e1610f00712",
-        "min": "da78044cc3be",
-        "random_0": "6f58445e8fc6",
-        "random_1": "59d36d63b5d9"
-      }
-    },
-    {
-      "step": 2126,
-      "total_loss": 8.114360570907593,
-      "grad_norm": 2.129194736480713,
-      "role_losses": {
-        "max": 1.6859817504882812,
-        "min": 2.225468635559082,
-        "random_0": 2.0987355709075928,
-        "random_1": 2.1041746139526367
-      },
-      "role_arch_ids": {
-        "max": "7e1610f00712",
-        "min": "da78044cc3be",
-        "random_0": "90d9c3c38238",
-        "random_1": "9712be809690"
-      }
-    },
-    {
-      "step": 2136,
-      "total_loss": 8.42859697341919,
-      "grad_norm": 2.1583831310272217,
-      "role_losses": {
-        "max": 1.9112765789031982,
-        "min": 2.20579195022583,
-        "random_0": 2.112924814224243,
-        "random_1": 2.198603630065918
-      },
-      "role_arch_ids": {
-        "max": "7e1610f00712",
-        "min": "da78044cc3be",
-        "random_0": "a521b5e37d15",
-        "random_1": "c692b8c18e3e"
-      }
-    },
-    {
-      "step": 2146,
-      "total_loss": 8.477096438407898,
-      "grad_norm": 2.48612380027771,
-      "role_losses": {
-        "max": 1.8250991106033325,
-        "min": 2.2346889972686768,
-        "random_0": 2.2364413738250732,
-        "random_1": 2.1808669567108154
-      },
-      "role_arch_ids": {
-        "max": "7e1610f00712",
-        "min": "da78044cc3be",
-        "random_0": "e0367a50fc84",
-        "random_1": "1623fbd32b37"
-      }
-    },
-    {
-      "step": 2156,
-      "total_loss": 8.396795988082886,
-      "grad_norm": 2.127490758895874,
-      "role_losses": {
-        "max": 1.8026673793792725,
-        "min": 2.2581570148468018,
-        "random_0": 2.201284646987915,
-        "random_1": 2.1346869468688965
-      },
-      "role_arch_ids": {
-        "max": "7e1610f00712",
-        "min": "da78044cc3be",
-        "random_0": "7894bac26b4a",
-        "random_1": "db211298d457"
-      }
-    },
-    {
-      "step": 2166,
-      "total_loss": 7.94191575050354,
-      "grad_norm": 2.265350580215454,
-      "role_losses": {
-        "max": 1.6772398948669434,
-        "min": 2.1338186264038086,
-        "random_0": 2.050117015838623,
-        "random_1": 2.080740213394165
-      },
-      "role_arch_ids": {
-        "max": "7e1610f00712",
-        "min": "da78044cc3be",
-        "random_0": "b27929c2a448",
-        "random_1": "fa78ada3cf16"
-      }
-    },
-    {
-      "step": 2176,
-      "total_loss": 7.757631540298462,
-      "grad_norm": 1.9557785987854004,
-      "role_losses": {
-        "max": 1.6953370571136475,
-        "min": 2.09456729888916,
-        "random_0": 1.961519718170166,
-        "random_1": 2.0062074661254883
-      },
-      "role_arch_ids": {
-        "max": "7e1610f00712",
-        "min": "da78044cc3be",
-        "random_0": "422926aa4a9d",
-        "random_1": "6fad263e9581"
-      }
-    },
-    {
-      "step": 2186,
-      "total_loss": 8.009920001029968,
-      "grad_norm": 2.158968687057495,
-      "role_losses": {
-        "max": 1.69953453540802,
-        "min": 2.150343894958496,
-        "random_0": 2.077592372894287,
-        "random_1": 2.082449197769165
-      },
-      "role_arch_ids": {
-        "max": "7e1610f00712",
-        "min": "da78044cc3be",
-        "random_0": "4c4c23dc7d53",
-        "random_1": "4a4da5b7d094"
-      }
-    },
-    {
-      "step": 2196,
-      "total_loss": 8.53920567035675,
-      "grad_norm": 2.047194719314575,
-      "role_losses": {
-        "max": 1.9189273118972778,
-        "min": 2.2153255939483643,
-        "random_0": 2.141739845275879,
-        "random_1": 2.2632129192352295
-      },
-      "role_arch_ids": {
-        "max": "7e1610f00712",
-        "min": "da78044cc3be",
-        "random_0": "76173f24688f",
-        "random_1": "c1d528468842"
-      }
-    },
-    {
-      "step": 2206,
-      "total_loss": 7.7541292905807495,
-      "grad_norm": 2.092536211013794,
-      "role_losses": {
-        "max": 1.5711029767990112,
-        "min": 2.0949838161468506,
-        "random_0": 2.08748459815979,
-        "random_1": 2.0005578994750977
-      },
-      "role_arch_ids": {
-        "max": "7e1610f00712",
-        "min": "da78044cc3be",
-        "random_0": "822fae2279ea",
-        "random_1": "cc3d89d9fb88"
-      }
-    },
-    {
-      "step": 2216,
-      "total_loss": 8.25176990032196,
-      "grad_norm": 1.911757230758667,
-      "role_losses": {
-        "max": 1.7187227010726929,
-        "min": 2.2783854007720947,
-        "random_0": 2.1786282062530518,
-        "random_1": 2.076033592224121
-      },
-      "role_arch_ids": {
-        "max": "7e1610f00712",
-        "min": "da78044cc3be",
-        "random_0": "fdff9cbb9890",
-        "random_1": "1df3967402fd"
-      }
-    },
-    {
-      "step": 2226,
-      "total_loss": 8.087204217910767,
-      "grad_norm": 2.00803804397583,
-      "role_losses": {
-        "max": 1.844860315322876,
-        "min": 2.1129674911499023,
-        "random_0": 2.0769526958465576,
-        "random_1": 2.0524237155914307
-      },
-      "role_arch_ids": {
-        "max": "7e1610f00712",
-        "min": "da78044cc3be",
-        "random_0": "f367e0031635",
-        "random_1": "94725ef11690"
-      }
-    },
-    {
-      "step": 2236,
-      "total_loss": 8.254056930541992,
-      "grad_norm": 2.1103899478912354,
-      "role_losses": {
-        "max": 1.8299100399017334,
-        "min": 2.2342288494110107,
-        "random_0": 2.1601970195770264,
-        "random_1": 2.0297210216522217
-      },
-      "role_arch_ids": {
-        "max": "7e1610f00712",
-        "min": "da78044cc3be",
-        "random_0": "0951d1bbcc65",
-        "random_1": "f6968a071706"
-      }
-    },
-    {
-      "step": 2246,
-      "total_loss": 7.925688147544861,
-      "grad_norm": 2.274740219116211,
-      "role_losses": {
-        "max": 1.7126063108444214,
-        "min": 2.1022531986236572,
-        "random_0": 2.1078708171844482,
-        "random_1": 2.002957820892334
-      },
-      "role_arch_ids": {
-        "max": "7e1610f00712",
-        "min": "da78044cc3be",
-        "random_0": "4431f859113b",
-        "random_1": "32ab3bf409a6"
-      }
-    },
-    {
-      "step": 2256,
-      "total_loss": 8.081568360328674,
-      "grad_norm": 1.9976540803909302,
-      "role_losses": {
-        "max": 1.6831947565078735,
-        "min": 2.212355136871338,
-        "random_0": 2.1524031162261963,
-        "random_1": 2.0336153507232666
-      },
-      "role_arch_ids": {
-        "max": "7e1610f00712",
-        "min": "da78044cc3be",
-        "random_0": "7b02acdbb16e",
-        "random_1": "46853226f3b8"
-      }
-    },
-    {
-      "step": 2266,
-      "total_loss": 8.084169507026672,
-      "grad_norm": 2.4183483123779297,
-      "role_losses": {
-        "max": 1.777694821357727,
-        "min": 2.2168166637420654,
-        "random_0": 2.057842493057251,
-        "random_1": 2.031815528869629
-      },
-      "role_arch_ids": {
-        "max": "7e1610f00712",
-        "min": "da78044cc3be",
-        "random_0": "908f859eba72",
-        "random_1": "8057c17fe7f8"
-      }
-    },
-    {
-      "step": 2276,
-      "total_loss": 7.921700358390808,
-      "grad_norm": 1.9679969549179077,
-      "role_losses": {
-        "max": 1.6788076162338257,
-        "min": 2.1491570472717285,
-        "random_0": 2.0774314403533936,
-        "random_1": 2.0163042545318604
-      },
-      "role_arch_ids": {
-        "max": "7e1610f00712",
-        "min": "da78044cc3be",
-        "random_0": "d9cf363ab220",
-        "random_1": "411ccaf89d78"
-      }
     }
   ],
   "evals": [
@@ -3981,19 +3556,19 @@
       "label": "max",
       "arch_id": "7e1610f00712",
       "parameters": 4625217,
-      "loss": 1.8099709004163742
+      "loss": 1.8491771817207336
     },
     {
       "label": "min",
       "arch_id": "da78044cc3be",
       "parameters": 144449,
-      "loss": 2.1397244930267334
+      "loss": 2.1772331297397614
     },
     {
       "label": "random sample",
-      "arch_id": "8bc54d3bc1a7",
-      "parameters": 1446593,
-      "loss": 2.149226814508438
+      "arch_id": "a2c3a5c4f8ec",
+      "parameters": 1075745,
+      "loss": 2.114224076271057
     }
   ],
   "depth_sweep": [
@@ -4001,43 +3576,43 @@
       "depth": 4,
       "arch_id": "4fefb0bc0583",
       "parameters": 1862721,
-      "loss": 1.8631533980369568
+      "loss": 1.909289687871933
     },
     {
       "depth": 5,
       "arch_id": "dc9e4c839dce",
       "parameters": 2323137,
-      "loss": 1.8411666750907898
+      "loss": 1.8858778476715088
     },
     {
       "depth": 6,
       "arch_id": "607bea1164fa",
       "parameters": 2783553,
-      "loss": 1.8336251080036163
+      "loss": 1.8740205317735672
     },
     {
       "depth": 7,
       "arch_id": "fa832eb1e6eb",
       "parameters": 3243969,
-      "loss": 1.8233038038015366
+      "loss": 1.8640469461679459
     },
     {
       "depth": 8,
       "arch_id": "7c1e430faa3f",
       "parameters": 3704385,
-      "loss": 1.8191607296466827
+      "loss": 1.8613710552453995
     },
     {
       "depth": 9,
       "arch_id": "31091c9a2c12",
       "parameters": 4164801,
-      "loss": 1.8133242726325989
+      "loss": 1.8534141182899475
     },
     {
       "depth": 10,
       "arch_id": "7e1610f00712",
       "parameters": 4625217,
-      "loss": 1.8099709004163742
+      "loss": 1.8491771817207336
     }
   ],
   "width_sweep": [
@@ -4045,31 +3620,31 @@
       "embed_dim": 64,
       "arch_id": "c2267e2dabed",
       "parameters": 1165761,
-      "loss": 2.020392030477524
+      "loss": 2.082841455936432
     },
     {
       "embed_dim": 96,
       "arch_id": "730dcf0510b3",
       "parameters": 2608769,
-      "loss": 1.9150866270065308
+      "loss": 1.928309127688408
     },
     {
       "embed_dim": 128,
       "arch_id": "7e1610f00712",
       "parameters": 4625217,
-      "loss": 1.8099709004163742
+      "loss": 1.8491771817207336
     }
   ],
   "ranking": {
     "num_candidates": 10,
-    "kendall_tau": 0.06666666666666667,
-    "spearman_rho": 0.04242424242424243,
-    "top1_agreement": true,
-    "supernet_top1_arch_id": "3489264a9990",
+    "kendall_tau": -0.1111111111111111,
+    "spearman_rho": -0.18787878787878787,
+    "top1_agreement": false,
+    "supernet_top1_arch_id": "cb1b4bd7ce9c",
     "standalone_top1_arch_id": "3489264a9990",
-    "regret": 0.0,
+    "regret": 0.10077506303787231,
     "best_standalone_loss": 2.2960319817066193,
-    "best_supernet_loss": 2.0782875418663025,
+    "best_supernet_loss": 2.10801100730896,
     "candidates": [
       {
         "arch_id": "ddad76621de5",
@@ -4133,7 +3708,7 @@
           ]
         },
         "parameters": 1373345,
-        "supernet_loss": 2.130087286233902,
+        "supernet_loss": 2.1570259034633636,
         "standalone_loss": 2.351629078388214,
         "supernet_rank": 6,
         "standalone_rank": 8
@@ -4190,9 +3765,9 @@
           ]
         },
         "parameters": 1333793,
-        "supernet_loss": 2.090935856103897,
+        "supernet_loss": 2.10801100730896,
         "standalone_loss": 2.3968070447444916,
-        "supernet_rank": 3,
+        "supernet_rank": 1,
         "standalone_rank": 10
       },
       {
@@ -4257,7 +3832,7 @@
           ]
         },
         "parameters": 542529,
-        "supernet_loss": 2.1363933086395264,
+        "supernet_loss": 2.172534078359604,
         "standalone_loss": 2.3107113242149353,
         "supernet_rank": 7,
         "standalone_rank": 3
@@ -4319,9 +3894,9 @@
           ]
         },
         "parameters": 754945,
-        "supernet_loss": 2.0782875418663025,
+        "supernet_loss": 2.135527938604355,
         "standalone_loss": 2.2960319817066193,
-        "supernet_rank": 1,
+        "supernet_rank": 3,
         "standalone_rank": 1
       },
       {
@@ -4386,7 +3961,7 @@
           ]
         },
         "parameters": 550401,
-        "supernet_loss": 2.188202053308487,
+        "supernet_loss": 2.2043520510196686,
         "standalone_loss": 2.299876034259796,
         "supernet_rank": 8,
         "standalone_rank": 2
@@ -4428,7 +4003,7 @@
           ]
         },
         "parameters": 260225,
-        "supernet_loss": 2.2222608029842377,
+        "supernet_loss": 2.261207640171051,
         "standalone_loss": 2.3127515614032745,
         "supernet_rank": 10,
         "standalone_rank": 4
@@ -4490,9 +4065,9 @@
           ]
         },
         "parameters": 1316129,
-        "supernet_loss": 2.093548536300659,
+        "supernet_loss": 2.1364534199237823,
         "standalone_loss": 2.329462230205536,
-        "supernet_rank": 4,
+        "supernet_rank": 5,
         "standalone_rank": 6
       },
       {
@@ -4552,9 +4127,9 @@
           ]
         },
         "parameters": 771329,
-        "supernet_loss": 2.0950809121131897,
+        "supernet_loss": 2.1363971829414368,
         "standalone_loss": 2.3356891572475433,
-        "supernet_rank": 5,
+        "supernet_rank": 4,
         "standalone_rank": 7
       },
       {
@@ -4609,7 +4184,7 @@
           ]
         },
         "parameters": 1296929,
-        "supernet_loss": 2.0843619406223297,
+        "supernet_loss": 2.127066284418106,
         "standalone_loss": 2.3183720111846924,
         "supernet_rank": 2,
         "standalone_rank": 5
@@ -4676,7 +4251,7 @@
           ]
         },
         "parameters": 2265025,
-        "supernet_loss": 2.193514585494995,
+        "supernet_loss": 2.2134634852409363,
         "standalone_loss": 2.3524679243564606,
         "supernet_rank": 9,
         "standalone_rank": 9
@@ -4687,12 +4262,12 @@
     {
       "label": "max 子网",
       "arch_id": "7e1610f00712",
-      "text": "ROMEO:\nMander of net reed pound of thou; which ding hell\nThe pattle honour tralious my pose will which it\nout too The"
+      "text": "ROMEO:\nMand thou nets for do him that that that the cwneng of and be of the told you that end, In the him\nWho thou ar"
     },
     {
       "label": "min 子网",
       "arch_id": "da78044cc3be",
-      "text": "ROMEO:\nWhy son hemee and penens this donen?\nI\n\nMIS:\n\nWhel pain anon imanls buand dim feastlerd!\n\n\nNIWAll dean thole y"
+      "text": "ROMEO:\nE yourk thing and menens this doon lead and thing\nthan walit meanll bon, kear fous lerlvizeNondly deal thith t"
     }
   ]
 }
