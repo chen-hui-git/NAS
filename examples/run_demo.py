@@ -76,8 +76,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="random legs of the sandwich (max and min are always trained)")
     parser.add_argument("--candidates", type=int, default=10,
                         help="candidates in the supernet-vs-standalone ranking experiment")
-    parser.add_argument("--standalone-steps", type=int, default=250,
-                        help="training steps per standalone candidate")
+    parser.add_argument("--standalone-steps", type=int, default=None,
+                        help="training steps per standalone candidate; default keeps the "
+                             "audit at ~16000 images per candidate (= 250 steps at batch 64)")
     parser.add_argument("--eval-batches", type=int, default=10)
     parser.add_argument("--train-share", type=float, default=0.6,
                         help="fraction of the remaining budget spent on sandwich training")
@@ -176,9 +177,16 @@ def main(argv: list[str] | None = None) -> int:
         128 if device == "mps" else 8
     )
     args.batch_size = batch_size
+    if args.standalone_steps is None:
+        # The audit compares candidates under an equal training budget, so keep the
+        # *image* budget fixed and let the step count follow the batch size.
+        audit_images = 16000
+        args.standalone_steps = max(20, round(audit_images / batch_size))
     say("=" * 68)
     say(f"超网 / 三明治采样教学 Demo    预算 {args.budget:.0f}s   数据集 {args.dataset}")
-    say(f"设备 {device}   batch {batch_size}")
+    say(f"设备 {device}   batch {batch_size}   "
+        f"审计: {args.candidates} 候选 x {args.standalone_steps} 步 "
+        f"= {args.candidates * args.standalone_steps * batch_size:,} 图")
     say(f"渐进收缩 shrink_stages={args.shrink_stages}"
         f"{'（关闭）' if args.shrink_stages <= 1 else f'（{args.shrink_stages} 级）'}   "
         f"子网蒸馏 distill_weight={args.distill_weight}"
