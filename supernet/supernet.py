@@ -31,10 +31,6 @@ class Supernet(nn.Module):
                 LayerCapacity(space.ffn_ratios, space.ffn_kernels)
                 for _ in range(space.max_depth)
             )
-        if len(capacities) != space.max_depth:
-            raise ValueError(
-                f"got {len(capacities)} layer capacities for depth {space.max_depth}"
-            )
         max_dim = space.max_embed_dim
         self.input_proj = ElasticConv1d(space.input_features, max_dim, 1)
         self.pos = nn.Parameter(torch.zeros(1, max_dim, space.max_seq_len))
@@ -50,17 +46,7 @@ class Supernet(nn.Module):
     # [snippet:supernet-forward]
     def forward(self, inputs: Tensor, spec: SubnetSpec) -> Tensor:
         """Run one subnet over a batch; returns class logits (batch, num_classes)."""
-        spec.validate(self.space)
-        if inputs.dim() != 3:
-            raise ValueError("inputs must be (batch, input_features, seq_len)")
         features, seq = inputs.shape[1], inputs.shape[2]
-        if features != self.space.input_features:
-            raise ValueError(
-                f"input has {features} features but the space expects "
-                f"{self.space.input_features}"
-            )
-        if seq > self.space.max_seq_len:
-            raise ValueError(f"seq {seq} exceeds max_seq_len {self.space.max_seq_len}")
         dim = spec.embed_dim
         x = self.input_proj(inputs, dim, features) + self.pos[:, :dim, :seq]
         for index in range(spec.depth):
@@ -90,7 +76,6 @@ class Supernet(nn.Module):
 
     def subnet_parameter_count(self, spec: SubnetSpec) -> int:
         """Analytic parameter count of one subnet, excluding unused branches."""
-        spec.validate(self.space)
         dim = spec.embed_dim
         classes = self.space.num_classes
         total = self.space.input_features * dim + dim

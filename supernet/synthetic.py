@@ -28,12 +28,6 @@ class BarsTask(Task):
         device: str = "cpu",
     ) -> None:
         self.device = device
-        if noise < 0:
-            raise ValueError("noise must be non-negative")
-        if bar_rows < 1:
-            raise ValueError("bar_rows must be positive")
-        if input_features < 1 or seq_len < bar_rows + 1:
-            raise ValueError("image too small for the requested bar")
         self.noise = noise
         self.bar_rows = bar_rows
         self.input_features = input_features

@@ -34,13 +34,6 @@ class RankingExperimentConfig:
     grad_clip: float = 1.0
     seed: int = 0
 
-    def __post_init__(self) -> None:
-        if self.num_candidates < 2:
-            raise ValueError("num_candidates must be at least 2")
-        if self.eval_batches < 1 or self.standalone_steps < 1:
-            raise ValueError("eval_batches and standalone_steps must be positive")
-
-
 def build_dense_subnet(space: SearchSpace, spec: SubnetSpec) -> Supernet:
     """A standalone model with exactly one subnet's parameters and no sharing."""
     point, capacities = point_space(spec, space)
@@ -49,8 +42,6 @@ def build_dense_subnet(space: SearchSpace, spec: SubnetSpec) -> Supernet:
 
 @torch.no_grad()
 def average_subnet_loss(model: Supernet, spec: SubnetSpec, batches: list[Batch]) -> float:
-    if not batches:
-        raise ValueError("need at least one evaluation batch")
     was_training = model.training
     model.eval()
     total = 0.0
@@ -64,8 +55,6 @@ def average_subnet_loss(model: Supernet, spec: SubnetSpec, batches: list[Batch])
 @torch.no_grad()
 def subnet_accuracy(model: Supernet, spec: SubnetSpec, batches: list[Batch]) -> float:
     """Fraction of correctly classified samples over the given batches."""
-    if not batches:
-        raise ValueError("need at least one evaluation batch")
     was_training = model.training
     model.eval()
     correct = 0
@@ -113,8 +102,6 @@ def train_standalone(
 
 def kendall_tau(supernet_scores: list[float], standalone_scores: list[float]) -> float:
     """Kendall tau-a over all pairs; ties inside a pair count as neither."""
-    if len(supernet_scores) != len(standalone_scores):
-        raise ValueError("score lists must have the same length")
     concordant = 0
     discordant = 0
     count = len(supernet_scores)
@@ -135,8 +122,6 @@ def kendall_tau(supernet_scores: list[float], standalone_scores: list[float]) ->
 
 def spearman_rho(supernet_scores: list[float], standalone_scores: list[float]) -> float:
     """Pearson correlation of average ranks; ties share the average rank."""
-    if len(supernet_scores) != len(standalone_scores):
-        raise ValueError("score lists must have the same length")
     left = _average_ranks(supernet_scores)
     right = _average_ranks(standalone_scores)
     mean_left = sum(left) / len(left)

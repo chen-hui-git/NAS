@@ -151,8 +151,6 @@ class MNISTTask(Task):
         )
 
     def fixed_batches(self, batch_size: int, count: int, seed: int = 0) -> list[Batch]:
-        if count < 1:
-            raise ValueError("count must be positive")
         generator = torch.Generator().manual_seed(seed)
         batches = []
         for _ in range(count):

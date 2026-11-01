@@ -26,8 +26,6 @@ def normalize_images(images: Tensor) -> Tensor:
     features. The same mean/std normalisation is used by every task so a subnet's
     quality is comparable across datasets.
     """
-    if images.dim() != 3:
-        raise ValueError("expected images of shape (batch, rows, cols)")
     pixels = images.to(torch.float32)
     if images.dtype == torch.uint8:
         pixels = pixels / 255.0
@@ -55,8 +53,6 @@ class Task:
 
     def fixed_batches(self, batch_size: int, count: int, seed: int = 0) -> list[Batch]:
         """A held-out batch list; every subnet is scored on the very same batches."""
-        if count < 1:
-            raise ValueError("count must be positive")
         generator = torch.Generator().manual_seed(seed)
         return [self.batch(batch_size, generator) for _ in range(count)]
 
@@ -88,14 +84,12 @@ def make_task(
 ) -> Task:
     """Build a task by name: 'mnist' (public digits) or 'bars' (synthetic, offline)."""
     key = name.strip().lower()
-    if key in {"mnist", "digits", "mnist-digits"}:
-        from .dataset import MNISTTask
-
-        return MNISTTask(
-            data_dir=data_dir, train_limit=train_limit, verbose=verbose, device=device
-        )
     if key in {"bars", "synthetic"}:
         from .synthetic import BarsTask
 
         return BarsTask(device=device)
-    raise ValueError(f"unknown task {name!r}; use 'mnist' or 'bars'")
+    from .dataset import MNISTTask
+
+    return MNISTTask(
+        data_dir=data_dir, train_limit=train_limit, verbose=verbose, device=device
+    )

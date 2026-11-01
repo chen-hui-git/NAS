@@ -83,7 +83,7 @@ supernet/
 examples/run_demo.py      端到端演示，带墙钟时间预算
 examples/render_report.py 只重渲染 HTML（改文案不用重新训练）
 docs/instructor_notes.md  教师用：课堂节奏 + 三个问题的参考答案
-tests/test_supernet.py    40 个回归测试
+tests/test_supernet.py    35 个回归测试
 ```
 
 代码片段不是复制粘贴的：`report.py` 用 `# [snippet:name]` 标记从真实源文件里抽取，
@@ -158,10 +158,14 @@ max 子网是质量上限兼“教师”，min 子网防止低端掉队，随机
 PYTHONPATH=. python3 -m unittest discover -s tests -v
 ```
 
-覆盖：空间校验、极端子网前向、输入宽度校验、未用分支不会泄漏、浅子网忽略深层、
-导出子网与共享前向逐位一致、参数计数与导出模型一致、三明治四条腿、深度/分支覆盖、
-训练确实降低 max 子网损失、排序指标、任务接口（含 MNIST 缓存时的真实形状）、
-报告代码片段抽取与高亮。
+覆盖：极端子网前向、未用分支不会泄漏、浅子网忽略深层、导出子网与共享前向逐位一致、
+参数计数与导出模型一致、三明治四条腿、深度/分支覆盖、训练确实降低 max 子网损失、
+排序指标（Kendall / Spearman / 一致性）、任务接口（含 MNIST 缓存时的真实形状）、
+切片示意图的格距与渲染、报告代码片段抽取与高亮。
+
+**风格约定：不做防御式校验。** `SubnetSpec.validate`、张量形状检查、通道容量越界检查这类
+`if ...: raise` 全部不写，出错就让 PyTorch 自己报 —— 教学代码里每一行都应该是算法本身。
+（例外：MNIST 下载要做 gzip/IDX 结构校验，那是数据完整性，不是调用方校验。）
 
 ## 参考文献
 

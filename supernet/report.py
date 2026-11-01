@@ -633,7 +633,7 @@ x = x + conv1d_k( LayerNorm(x) , out = dim x ratio )    ← kernel、ratio 来�
   viz.py            教学图（matplotlib，headless）
   report.py         本页的 HTML 生成器
 examples/run_demo.py  端到端演示（带时间预算）
-tests/test_supernet.py 40 个回归测试</pre>
+tests/test_supernet.py 35 个回归测试</pre>
   <h3>课堂讨论：三个问题</h3>
   <p>先让学生只看第 5、6 节的数据自己回答，再对照教师用文档：</p>
   <div class="ok">

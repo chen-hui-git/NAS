@@ -38,18 +38,6 @@ class SandwichConfig:
     grad_clip: float = 1.0
     seed: int = 0
 
-    def __post_init__(self) -> None:
-        if self.n_random < 0:
-            raise ValueError("n_random must be non-negative")
-        for name, value in (
-            ("max_weight", self.max_weight),
-            ("min_weight", self.min_weight),
-            ("random_weight", self.random_weight),
-        ):
-            if value < 0:
-                raise ValueError(f"{name} must be non-negative")
-
-
 @dataclass
 class SandwichStats:
     """Coverage evidence: which parts of the space actually received gradients."""

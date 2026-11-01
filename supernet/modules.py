@@ -39,10 +39,6 @@ class ElasticConv1d(nn.Module):
         bias: bool = True,
     ) -> None:
         super().__init__()
-        if max_in_channels < 1 or max_out_channels < 1:
-            raise ValueError("channel counts must be positive")
-        if kernel_size < 1 or kernel_size % 2 == 0:
-            raise ValueError("kernel_size must be positive and odd (symmetric padding)")
         self.max_in_channels = max_in_channels
         self.max_out_channels = max_out_channels
         self.kernel_size = kernel_size
@@ -62,18 +58,6 @@ class ElasticConv1d(nn.Module):
 
     # [snippet:elastic-conv]
     def forward(self, x: Tensor, out_channels: int, in_channels: int) -> Tensor:
-        if out_channels > self.max_out_channels:
-            raise ValueError(
-                f"out_channels {out_channels} exceeds capacity {self.max_out_channels}"
-            )
-        if in_channels > self.max_in_channels:
-            raise ValueError(
-                f"in_channels {in_channels} exceeds capacity {self.max_in_channels}"
-            )
-        if x.shape[1] != in_channels:
-            raise ValueError(
-                f"input has {x.shape[1]} channels but subnet needs {in_channels}"
-            )
         weight = self.weight[:out_channels, :in_channels]
         bias = None if self.bias is None else self.bias[:out_channels]
         return F.conv1d(x, weight, bias, padding=self.padding)
@@ -91,10 +75,6 @@ class ElasticLayerNorm(nn.Module):
         self.bias = nn.Parameter(torch.zeros(max_channels))
 
     def forward(self, x: Tensor, channels: int) -> Tensor:
-        if channels > self.max_channels:
-            raise ValueError(f"channels {channels} exceeds capacity {self.max_channels}")
-        if x.shape[1] != channels:
-            raise ValueError(f"input has {x.shape[1]} channels but norm needs {channels}")
         y = x.transpose(1, 2)
         y = F.layer_norm(
             y, (channels,), self.weight[:channels], self.bias[:channels], self.eps
@@ -112,12 +92,8 @@ class ElasticAttention(nn.Module):
         self.proj = ElasticConv1d(max_dim, max_dim, 1)
 
     def forward(self, x: Tensor, dim: int, head_dim: int) -> Tensor:
-        if dim % head_dim != 0:
-            raise ValueError("dim must be divisible by head_dim")
         heads = dim // head_dim
-        batch, channels, seq = x.shape
-        if channels != dim:
-            raise ValueError(f"input has {channels} channels but attention needs {dim}")
+        batch, _, seq = x.shape
         qkv = self.qkv(x, 3 * dim, dim)
         q, k, v = qkv.split(dim, dim=1)
         shape = (batch, heads, head_dim, seq)
@@ -166,10 +142,7 @@ class ElasticFFN(nn.Module):
     def forward(
         self, x: Tensor, dim: int, ffn_ratio: int, ffn_kernel: int, activation: str
     ) -> Tensor:
-        key = branch_key(ffn_ratio, ffn_kernel)
-        if key not in self.branches:
-            raise KeyError(f"branch {key} not instantiated; have {list(self.branches)}")
-        return self.branches[key](x, dim, activation)
+        return self.branches[branch_key(ffn_ratio, ffn_kernel)](x, dim, activation)
     # [/snippet:elastic-ffn]
 
 

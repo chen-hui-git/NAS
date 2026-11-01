@@ -64,46 +64,6 @@ def make_labels(batch_size: int = 2) -> torch.Tensor:
 
 
 class SearchSpaceTests(unittest.TestCase):
-    def test_rejects_depth_outside_the_space(self) -> None:
-        spec = SubnetSpec(
-            depth=5,
-            embed_dim=16,
-            head_dim=8,
-            layers=tuple(LayerChoice(2, 1, "gelu") for _ in range(5)),
-        )
-        with self.assertRaises(ValueError):
-            spec.validate(TEST_SPACE)
-
-    def test_rejects_unknown_branch(self) -> None:
-        spec = SubnetSpec(
-            depth=2,
-            embed_dim=16,
-            head_dim=8,
-            layers=(LayerChoice(5, 1, "gelu"), LayerChoice(2, 1, "gelu")),
-        )
-        with self.assertRaises(ValueError):
-            spec.validate(TEST_SPACE)
-
-    def test_rejects_layer_count_mismatch(self) -> None:
-        spec = SubnetSpec(
-            depth=3,
-            embed_dim=16,
-            head_dim=8,
-            layers=tuple(LayerChoice(2, 1, "gelu") for _ in range(2)),
-        )
-        with self.assertRaises(ValueError):
-            spec.validate(TEST_SPACE)
-
-    def test_rejects_non_divisible_head_dim(self) -> None:
-        spec = SubnetSpec(
-            depth=2,
-            embed_dim=16,
-            head_dim=32,
-            layers=tuple(LayerChoice(2, 1, "gelu") for _ in range(2)),
-        )
-        with self.assertRaises(ValueError):
-            spec.validate(TEST_SPACE)
-
     def test_max_subnet_is_the_expensive_corner(self) -> None:
         spec = TEST_SPACE.max_subnet()
         self.assertEqual(spec.depth, TEST_SPACE.max_depth)
@@ -142,11 +102,6 @@ class SupernetForwardTests(unittest.TestCase):
             logits = model(inputs, spec)
             self.assertEqual(logits.shape, (inputs.shape[0], TEST_SPACE.num_classes))
             self.assertTrue(torch.isfinite(logits).all())
-
-    def test_rejects_wrong_input_width(self) -> None:
-        model = Supernet(TEST_SPACE)
-        with self.assertRaises(ValueError):
-            model(torch.randn(2, TEST_SPACE.input_features + 1, 6), TEST_SPACE.min_subnet())
 
     def test_unused_branch_cannot_leak(self) -> None:
         torch.manual_seed(0)
@@ -244,11 +199,6 @@ class LossTests(unittest.TestCase):
         good = torch.nn.functional.one_hot(labels, TEST_SPACE.num_classes).float() * 10.0
         self.assertLess(float(classification_loss(good, labels)), 0.01)
         self.assertEqual(accuracy(good, labels), 1.0)
-
-    def test_rejects_wrong_shapes(self) -> None:
-        with self.assertRaises(ValueError):
-            classification_loss(torch.zeros(3), torch.zeros(3, dtype=torch.long))
-
 
 class SandwichRuleTests(unittest.TestCase):
     def _batch(self):
@@ -384,11 +334,6 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(sorted(labels.tolist()), list(range(task.num_classes)))
         self.assertEqual(tuple(images.shape), (task.num_classes, task.seq_len, task.input_features))
         self.assertEqual(images.dtype, torch.uint8)
-
-    def test_unknown_task_name_is_rejected(self) -> None:
-        with self.assertRaises(ValueError):
-            make_task("cifar-100")
-
 
 class MNISTTaskTests(unittest.TestCase):
     @classmethod

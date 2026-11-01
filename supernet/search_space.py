@@ -31,14 +31,6 @@ class LayerChoice:
     ffn_kernel: int
     activation: str
 
-    def validate(self, space: "SearchSpace") -> None:
-        if self.ffn_ratio not in space.ffn_ratios:
-            raise ValueError(f"ffn_ratio {self.ffn_ratio} not in {space.ffn_ratios}")
-        if self.ffn_kernel not in space.ffn_kernels:
-            raise ValueError(f"ffn_kernel {self.ffn_kernel} not in {space.ffn_kernels}")
-        if self.activation not in space.activations:
-            raise ValueError(f"activation {self.activation} not in {space.activations}")
-
     def to_dict(self) -> dict[str, Any]:
         return {
             "ffn_ratio": self.ffn_ratio,
@@ -73,24 +65,6 @@ class SubnetSpec:
             "head_dim": self.head_dim,
             "layers": [layer.to_dict() for layer in self.layers],
         }
-
-    def validate(self, space: "SearchSpace") -> None:
-        if not space.min_depth <= self.depth <= space.max_depth:
-            raise ValueError(
-                f"depth {self.depth} outside [{space.min_depth}, {space.max_depth}]"
-            )
-        if self.embed_dim not in space.embed_dims:
-            raise ValueError(f"embed_dim {self.embed_dim} not in {space.embed_dims}")
-        if self.head_dim not in space.head_dims:
-            raise ValueError(f"head_dim {self.head_dim} not in {space.head_dims}")
-        if self.embed_dim % self.head_dim != 0:
-            raise ValueError("embed_dim must be divisible by head_dim")
-        if len(self.layers) != self.depth:
-            raise ValueError(
-                f"spec has {len(self.layers)} layer choices but depth {self.depth}"
-            )
-        for layer in self.layers:
-            layer.validate(space)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -131,36 +105,6 @@ class SearchSpace:
     num_classes: int = 10
     input_features: int = 28
     max_seq_len: int = 32
-
-    def __post_init__(self) -> None:
-        self.validate()
-
-    def validate(self) -> None:
-        if self.min_depth < 1:
-            raise ValueError("min_depth must be positive")
-        if self.max_depth < self.min_depth:
-            raise ValueError("max_depth must be >= min_depth")
-        for name, values in (
-            ("embed_dims", self.embed_dims),
-            ("head_dims", self.head_dims),
-            ("ffn_ratios", self.ffn_ratios),
-            ("ffn_kernels", self.ffn_kernels),
-            ("activations", self.activations),
-        ):
-            if not values:
-                raise ValueError(f"{name} must not be empty")
-        if self.num_classes < 2 or self.max_seq_len < 1:
-            raise ValueError("num_classes and max_seq_len must be positive")
-        if self.input_features < 1:
-            raise ValueError("input_features must be positive")
-        for ratio in self.ffn_ratios:
-            if ratio < 1:
-                raise ValueError("ffn_ratios must be positive")
-        for kernel in self.ffn_kernels:
-            if kernel < 1 or kernel % 2 == 0:
-                raise ValueError("ffn_kernels must be positive and odd")
-        if not self.valid_dim_pairs():
-            raise ValueError("no (embed_dim, head_dim) pair is divisible")
 
     def valid_dim_pairs(self) -> tuple[tuple[int, int], ...]:
         return tuple(
@@ -212,8 +156,6 @@ class SearchSpace:
 
     def _head_dim_for(self, embed_dim: int, *, prefer: str) -> int:
         candidates = [h for h in self.head_dims if embed_dim % h == 0]
-        if not candidates:
-            raise ValueError(f"no head_dim divides embed_dim {embed_dim}")
         return min(candidates) if prefer == "min" else max(candidates)
 
     def sample(self, rng: "random.Random | None" = None) -> SubnetSpec:
@@ -256,7 +198,6 @@ def point_space(
     The result admits exactly spec and instantiates only the branches that spec
     needs, which is how a subnet is exported into a standalone model.
     """
-    spec.validate(space)
     point = SearchSpace(
         min_depth=spec.depth,
         max_depth=spec.depth,
