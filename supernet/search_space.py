@@ -112,6 +112,15 @@ class SearchSpace:
             if dim % head_dim == 0
         )
 
+    def architecture_count(self) -> int:
+        """这个空间能容纳的候选架构总数（宽度-head 组合 × 每层分支数的 depth 次幂之和）。"""
+        per_layer = len(self.ffn_ratios) * len(self.ffn_kernels) * len(self.activations)
+        pairs = len(self.valid_dim_pairs())
+        return sum(
+            pairs * per_layer ** depth
+            for depth in range(self.min_depth, self.max_depth + 1)
+        )
+
     @property
     def max_embed_dim(self) -> int:
         return max(self.embed_dims)

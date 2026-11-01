@@ -13,10 +13,9 @@ import random
 import time
 from typing import Callable
 
-from torch import Tensor
 import torch
 
-from .losses import accuracy, classification_loss
+from .losses import classification_loss
 from .search_space import SearchSpace, SubnetSpec, point_space
 from .supernet import Supernet
 from .tasks import Batch, Task

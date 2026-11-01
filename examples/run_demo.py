@@ -156,16 +156,6 @@ def resolve_device(requested: str) -> str:
     return requested
 
 
-def count_architectures(space: SearchSpace) -> int:
-    """该空间能容纳的不同 spec 的确切数量。"""
-    choices = len(space.ffn_ratios) * len(space.ffn_kernels) * len(space.activations)
-    pairs = len(space.valid_dim_pairs())
-    return sum(
-        pairs * choices ** depth
-        for depth in range(space.min_depth, space.max_depth + 1)
-    )
-
-
 def head_dim_for(space: SearchSpace, embed_dim: int) -> int:
     candidates = [item for item in space.head_dims if embed_dim % item == 0]
     if not candidates:
@@ -186,16 +176,13 @@ def quality_spec(space: SearchSpace, depth: int, embed_dim: int) -> SubnetSpec:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    logging_ready = False
     started = time.monotonic()
     started_at = time.strftime("%Y-%m-%d %H:%M:%S")
     out_dir = Path(args.out)
     figures_dir = out_dir / "figures"
     out_dir.mkdir(parents=True, exist_ok=True)
-    if not logging_ready:
-        log_file = out_dir / args.log_file if args.log_file else None
-        configure_logging(args.log_level, log_file)
-        logging_ready = True
+    log_file = out_dir / args.log_file if args.log_file else None
+    configure_logging(args.log_level, log_file)
     timings: dict[str, float] = {}
 
     def mark(name: str, since: float) -> float:
@@ -266,7 +253,7 @@ def main(argv: list[str] | None = None) -> int:
     supernet_params = sum(parameter.numel() for parameter in trainer.model.parameters())
     max_params = trainer.model.subnet_parameter_count(max_spec)
     min_params = trainer.model.subnet_parameter_count(min_spec)
-    LOGGER.info(f"      空间候选数          : {count_architectures(space):,}")
+    LOGGER.info(f"      空间候选数          : {space.architecture_count():,}")
     LOGGER.info(f"      超网参数量          : {supernet_params / 1e6:.2f}M")
     LOGGER.info(f"      max 子网 (d{space.max_depth}/{space.max_embed_dim}) : {max_params / 1e6:.2f}M")
     LOGGER.info(f"      min 子网 (d{space.min_depth}/{space.min_embed_dim})  : {min_params / 1e6:.3f}M")
@@ -534,7 +521,7 @@ def main(argv: list[str] | None = None) -> int:
             "device": device,
             "chance_loss": chance_loss,
             "chance_accuracy": chance_accuracy,
-            "space_size": count_architectures(space),
+            "space_size": space.architecture_count(),
             "dataset": task.describe(),
             "space": space.to_dict(),
             "params": {

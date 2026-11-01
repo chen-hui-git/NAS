@@ -29,7 +29,6 @@ from supernet import (  # noqa: E402
     classification_loss,
     fine_tune_subnet,
     kendall_tau,
-    make_task,
     normalize_images,
     parameter_breakdown,
     run_ranking_experiment,
